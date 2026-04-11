@@ -1,0 +1,180 @@
+{
+  "name": "V3 - Calendar Suggestions",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "calendar-suggestions",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "e4d5f6a7-0001-0001-0001-000000000001",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "const fs = require('fs');\nlet digest = {items: []};\ntry { digest = JSON.parse(fs.readFileSync('/data/last_digest.json', 'utf8')); } catch(e) {}\nconst profile = JSON.parse(fs.readFileSync('/data/user_profile.json', 'utf8'));\nreturn [{json: {digest, profile}}];"
+      },
+      "id": "e4d5f6a7-0002-0002-0002-000000000002",
+      "name": "Read Last Digest",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Build CalDAV PROPFIND request for next 7 days\nconst now = new Date();\nconst start = now.toISOString().replace(/\\.\\d{3}Z$/, 'Z');\nconst end = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString().replace(/\\.\\d{3}Z$/, 'Z');\nconst startFormatted = start.replace(/[-:]/g, '').replace('T', 'T').split('.')[0] + 'Z';\nconst endFormatted = end.replace(/[-:]/g, '').replace('T', 'T').split('.')[0] + 'Z';\nconst xmlBody = `<?xml version=\"1.0\" encoding=\"utf-8\" ?>\n<C:calendar-query xmlns:D=\"DAV:\" xmlns:C=\"urn:ietf:params:xml:ns:caldav\">\n  <D:prop>\n    <D:getetag/>\n    <C:calendar-data/>\n  </D:prop>\n  <C:filter>\n    <C:comp-filter name=\"VCALENDAR\">\n      <C:comp-filter name=\"VEVENT\">\n        <C:time-range start=\"${startFormatted}\" end=\"${endFormatted}\"/>\n      </C:comp-filter>\n    </C:comp-filter>\n  </C:filter>\n</C:calendar-query>`;\nreturn [{json: {xmlBody, start, end}}];"
+      },
+      "id": "e4d5f6a7-0003-0003-0003-000000000003",
+      "name": "Build CalDAV Request",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "method": "REPORT",
+        "url": "=https://caldav.icloud.com/{{$env.APPLE_CALDAV_USER}}/calendars/{{encodeURIComponent($env.APPLE_CALENDAR_NAME)}}/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {"name": "Depth", "value": "1"},
+            {"name": "Content-Type", "value": "application/xml; charset=utf-8"}
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "string",
+        "body": "={{$json.xmlBody}}",
+        "options": {
+          "timeout": 20000
+        },
+        "credentials": {
+          "httpBasicAuth": {
+            "user": "={{$env.APPLE_CALDAV_USER}}",
+            "password": "={{$env.APPLE_CALDAV_PASSWORD}}"
+          }
+        }
+      },
+      "id": "e4d5f6a7-0004-0004-0004-000000000004",
+      "name": "CalDAV Fetch Events",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Parse CalDAV XML response and extract VEVENT data\nconst xmlText = $input.first().json.data || '';\nconst events = [];\n// Simple regex-based VCALENDAR parser\nconst vcalBlocks = xmlText.match(/BEGIN:VCALENDAR[\\s\\S]*?END:VCALENDAR/g) || [];\nfor (const vcal of vcalBlocks) {\n  const veventBlocks = vcal.match(/BEGIN:VEVENT[\\s\\S]*?END:VEVENT/g) || [];\n  for (const vevent of veventBlocks) {\n    const dtstart = vevent.match(/DTSTART[^:]*:([^\\n\\r]+)/)?.[1]?.trim();\n    const dtend = vevent.match(/DTEND[^:]*:([^\\n\\r]+)/)?.[1]?.trim();\n    const summary = vevent.match(/SUMMARY:([^\\n\\r]+)/)?.[1]?.trim() || 'Evento sin título';\n    if (!dtstart || !dtend) continue;\n    const parseDate = (d) => {\n      if (d.includes('T')) {\n        return new Date(d.replace(/(\\d{4})(\\d{2})(\\d{2})T(\\d{2})(\\d{2})(\\d{2})Z?/, '$1-$2-$3T$4:$5:$6Z'));\n      }\n      return new Date(d.replace(/(\\d{4})(\\d{2})(\\d{2})/, '$1-$2-$3'));\n    };\n    events.push({\n      summary,\n      start: parseDate(dtstart),\n      end: parseDate(dtend)\n    });\n  }\n}\nevents.sort((a, b) => a.start - b.start);\n// Compute free slots by day\nconst profile = $('Read Last Digest').first().json.profile;\nconst preferredSlots = profile.consumption_schedule?.preferred_slots || ['mañana 7:00-9:00', 'noche 21:00-23:00'];\nreturn [{json: {events, preferred_slots: preferredSlots, event_count: events.length}}];"
+      },
+      "id": "e4d5f6a7-0005-0005-0005-000000000005",
+      "name": "Parse CalDAV XML",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {"name": "x-api-key", "value": "={{$env.ANTHROPIC_API_KEY}}"},
+            {"name": "anthropic-version", "value": "2023-06-01"},
+            {"name": "content-type", "value": "application/json"}
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"claude-sonnet-4-5\",\n  \"max_tokens\": 1024,\n  \"system\": \"Eres un asistente de planificación de contenidos. SOLO lectura de calendario. NUNCA propones crear o modificar eventos. Sugieres cuándo consumir contenido basándote en huecos libres. Responde solo con JSON: {suggestions: [{item_id, item_title, suggested_slot, duration_minutes, reason}], telegram_message: string}.\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"Eventos próximos 7 días: \" + JSON.stringify($('Parse CalDAV XML').first().json.events.map(e => ({summary: e.summary, start: e.start, end: e.end}))) + \"\\n\\nSlots preferidos del usuario: \" + JSON.stringify($json.preferred_slots) + \"\\n\\nContenido del digest: \" + JSON.stringify($('Read Last Digest').first().json.digest.items?.slice(0, 8).map(i => ({id: i.id, title: i.title, duration_minutes: i.duration_minutes, score: i.score, type: i.type})) || []) + \"\\n\\nSugiere cuándo escuchar/ver cada ítem. Máx 5 sugerencias. Solo ítems con score >= 7.\"\n    }\n  ]\n}",
+        "options": {}
+      },
+      "id": "e4d5f6a7-0006-0006-0006-000000000006",
+      "name": "Claude Calendar Suggestions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1340, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "const claudeResponse = $input.first().json;\nconst content = claudeResponse.content?.[0]?.text || '{}';\nlet result;\ntry { result = JSON.parse(content); } catch(e) {\n  const match = content.match(/\\{[\\s\\S]*\\}/);\n  result = match ? JSON.parse(match[0]) : {suggestions: [], telegram_message: 'No hay sugerencias disponibles esta semana.'};\n}\nreturn [{json: result}];"
+      },
+      "id": "e4d5f6a7-0007-0007-0007-000000000007",
+      "name": "Parse Suggestions",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1560, 300]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{$env.TELEGRAM_CHAT_ID}}",
+        "text": "=📅 *Agenda sugerida*\n\n{{$json.telegram_message}}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "e4d5f6a7-0008-0008-0008-000000000008",
+      "name": "Send Calendar Supplement",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [1780, 300],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram_creds",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "OK"
+      },
+      "id": "e4d5f6a7-0009-0009-0009-000000000009",
+      "name": "Webhook Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [2000, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [[{"node": "Read Last Digest", "type": "main", "index": 0}]]
+    },
+    "Read Last Digest": {
+      "main": [[{"node": "Build CalDAV Request", "type": "main", "index": 0}]]
+    },
+    "Build CalDAV Request": {
+      "main": [[{"node": "CalDAV Fetch Events", "type": "main", "index": 0}]]
+    },
+    "CalDAV Fetch Events": {
+      "main": [[{"node": "Parse CalDAV XML", "type": "main", "index": 0}]]
+    },
+    "Parse CalDAV XML": {
+      "main": [[{"node": "Claude Calendar Suggestions", "type": "main", "index": 0}]]
+    },
+    "Claude Calendar Suggestions": {
+      "main": [[{"node": "Parse Suggestions", "type": "main", "index": 0}]]
+    },
+    "Parse Suggestions": {
+      "main": [[{"node": "Send Calendar Supplement", "type": "main", "index": 0}]]
+    },
+    "Send Calendar Supplement": {
+      "main": [[{"node": "Webhook Response", "type": "main", "index": 0}]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "id": "v3-calendar-suggestions-workflow",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

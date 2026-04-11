@@ -1,0 +1,371 @@
+{
+  "name": "V0 - Spotify Onboarding",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "onboarding",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "b1a2c3d4-0001-0001-0001-000000000001",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "const fs = require('fs');\nconst path = '/data/onboarding_state.json';\nlet state = {started: false, spotify_connected: false, survey_day: 0, questions_asked: [], questions_answered: [], completed: false};\ntry { state = JSON.parse(fs.readFileSync(path, 'utf8')); } catch(e) {}\nif (state.completed) {\n  return [{json: {skip: true, message: 'Onboarding already complete'}}];\n}\nreturn [{json: {skip: false, state}}];"
+      },
+      "id": "b1a2c3d4-0002-0002-0002-000000000002",
+      "name": "Check Onboarding State",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.skip}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "b1a2c3d4-0003-0003-0003-000000000003",
+      "name": "Already Complete?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "const crypto = require('crypto');\n// Generate PKCE code_verifier (43-128 chars, URL-safe)\nconst verifier = crypto.randomBytes(64).toString('base64url').slice(0, 96);\n// code_challenge = BASE64URL(SHA256(verifier))\nconst challenge = crypto.createHash('sha256').update(verifier).digest('base64url');\nconst clientId = process.env.SPOTIFY_CLIENT_ID;\nconst redirectUri = encodeURIComponent(process.env.SPOTIFY_REDIRECT_URI);\nconst scopes = encodeURIComponent('user-follow-read user-read-recently-played user-library-read');\nconst authUrl = `https://accounts.spotify.com/authorize?response_type=code&client_id=${clientId}&scope=${scopes}&redirect_uri=${redirectUri}&code_challenge_method=S256&code_challenge=${challenge}`;\n// Store verifier for later token exchange\nconst fs = require('fs');\nfs.writeFileSync('/data/spotify_pkce_state.json', JSON.stringify({verifier, challenge}), {mode: 0o600});\nreturn [{json: {authUrl, verifier, challenge}}];"
+      },
+      "id": "b1a2c3d4-0004-0004-0004-000000000004",
+      "name": "Generate Spotify Auth URL",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [900, 400]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{$env.TELEGRAM_CHAT_ID}}",
+        "text": "=🎵 *Conectar Spotify*\n\nAbre este enlace en tu navegador para conectar tu cuenta de Spotify:\n\n{{$json.authUrl}}\n\nDespués de autorizar, copia la URL completa de redirección (empieza por `http://localhost:8888/callback?code=...`) y envíamela aquí.",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "b1a2c3d4-0005-0005-0005-000000000005",
+      "name": "Send Auth Link",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [1120, 400],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram_creds",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "spotify-callback",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "b1a2c3d4-0006-0006-0006-000000000006",
+      "name": "Spotify Callback Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [900, 560]
+    },
+    {
+      "parameters": {
+        "functionCode": "const fs = require('fs');\nconst https = require('https');\nconst querystring = require('querystring');\nconst code = $input.first().json.query.code;\nconst pkceState = JSON.parse(fs.readFileSync('/data/spotify_pkce_state.json', 'utf8'));\nconst verifier = pkceState.verifier;\nconst postData = querystring.stringify({\n  grant_type: 'authorization_code',\n  code: code,\n  redirect_uri: process.env.SPOTIFY_REDIRECT_URI,\n  client_id: process.env.SPOTIFY_CLIENT_ID,\n  code_verifier: verifier\n});\n// HTTP request handled by subsequent HTTP Request node\nreturn [{json: {code, verifier, postData}}];"
+      },
+      "id": "b1a2c3d4-0007-0007-0007-000000000007",
+      "name": "Prepare Token Exchange",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1120, 560]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://accounts.spotify.com/api/token",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {"name": "Content-Type", "value": "application/x-www-form-urlencoded"}
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {"name": "grant_type", "value": "authorization_code"},
+            {"name": "code", "value": "={{$json.code}}"},
+            {"name": "redirect_uri", "value": "={{$env.SPOTIFY_REDIRECT_URI}}"},
+            {"name": "client_id", "value": "={{$env.SPOTIFY_CLIENT_ID}}"},
+            {"name": "code_verifier", "value": "={{$json.verifier}}"}
+          ]
+        },
+        "options": {}
+      },
+      "id": "b1a2c3d4-0008-0008-0008-000000000008",
+      "name": "Exchange Code for Token",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1340, 560]
+    },
+    {
+      "parameters": {
+        "functionCode": "const fs = require('fs');\nconst tokenData = $input.first().json;\nconst tokenPath = '/data/spotify_token.json';\nfs.writeFileSync(tokenPath, JSON.stringify({\n  access_token: tokenData.access_token,\n  refresh_token: tokenData.refresh_token,\n  token_type: tokenData.token_type,\n  expires_in: tokenData.expires_in,\n  obtained_at: new Date().toISOString()\n}, null, 2), {mode: 0o600});\nreturn [{json: {success: true, access_token: tokenData.access_token}}];"
+      },
+      "id": "b1a2c3d4-0009-0009-0009-000000000009",
+      "name": "Save Spotify Token",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1560, 560]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.spotify.com/v1/me/following?type=show&limit=50",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {"name": "Authorization", "value": "=Bearer {{$json.access_token}}"}
+          ]
+        },
+        "options": {}
+      },
+      "id": "b1a2c3d4-0010-0010-0010-000000000010",
+      "name": "Fetch Followed Podcasts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1780, 560]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.spotify.com/v1/me/player/recently-played?limit=50",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {"name": "Authorization", "value": "=Bearer {{$node[\"Save Spotify Token\"].json.access_token}}"}
+          ]
+        },
+        "options": {}
+      },
+      "id": "b1a2c3d4-0011-0011-0011-000000000011",
+      "name": "Fetch Play History",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1780, 700]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Lookup RSS URLs via Podcast Index for each show\nconst crypto = require('crypto');\nconst shows = $input.first().json.shows?.items || [];\nconst apiKey = process.env.PODCASTINDEX_API_KEY;\nconst apiSecret = process.env.PODCASTINDEX_API_SECRET;\nconst unixTime = Math.floor(Date.now() / 1000);\nconst authHash = crypto.createHash('sha1').update(apiKey + apiSecret + unixTime).digest('hex');\n// Return shows with auth headers for subsequent requests\nconst showsToLookup = shows.map(s => ({\n  name: s.name,\n  spotify_show_id: s.id,\n  language: s.languages?.[0] || 'en',\n  publisher: s.publisher\n}));\nreturn [{json: {shows: showsToLookup, apiKey, authHash, unixTime}}];"
+      },
+      "id": "b1a2c3d4-0012-0012-0012-000000000012",
+      "name": "Prepare RSS Lookup",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [2000, 560]
+    },
+    {
+      "parameters": {
+        "functionCode": "const fs = require('fs');\nconst lookupData = $input.first().json;\nconst shows = lookupData.shows || [];\n// Build known_podcasts entries (RSS lookup would happen per-show in production)\n// Here we build the structure; RSS URLs populated by Podcast Index in batch\nconst profilePath = '/data/user_profile.json';\nlet profile = JSON.parse(fs.readFileSync(profilePath, 'utf8'));\nconst existingNames = new Set(profile.known_podcasts.map(p => p.name.toLowerCase()));\nfor (const show of shows) {\n  if (!existingNames.has(show.name.toLowerCase())) {\n    profile.known_podcasts.push({\n      name: show.name,\n      rss_url: null,\n      spotify_show_id: show.spotify_show_id,\n      language: show.language || 'en',\n      priority: 5,\n      max_duration_minutes: 90,\n      feedback: {\n        topic_score: null,\n        host_score: null,\n        completion_rate: null,\n        why_i_like: [],\n        episodes_rated: 0,\n        quick_likes: 0,\n        quick_dislikes: 0\n      }\n    });\n  }\n}\nprofile.last_updated = new Date().toISOString();\nfs.writeFileSync(profilePath, JSON.stringify(profile, null, 2));\n// Update onboarding state\nconst statePath = '/data/onboarding_state.json';\nconst state = JSON.parse(fs.readFileSync(statePath, 'utf8'));\nstate.spotify_connected = true;\nstate.started = true;\nstate.survey_day = 1;\nfs.writeFileSync(statePath, JSON.stringify(state, null, 2));\nreturn [{json: {podcasts_imported: shows.length, profile_path: profilePath}}];"
+      },
+      "id": "b1a2c3d4-0013-0013-0013-000000000013",
+      "name": "Populate Profile",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [2220, 560]
+    },
+    {
+      "parameters": {
+        "functionCode": "const fs = require('fs');\nconst profile = JSON.parse(fs.readFileSync('/data/user_profile.json', 'utf8'));\nconst state = JSON.parse(fs.readFileSync('/data/onboarding_state.json', 'utf8'));\nconst podcasts = profile.known_podcasts;\n// Select 3-5 podcasts not yet surveyed for day 1\nconst surveyed = new Set(state.questions_asked.map(q => q.podcast_name));\nconst toSurvey = podcasts.filter(p => !surveyed.has(p.name)).slice(0, 4);\nconst questions = [];\nfor (const podcast of toSurvey) {\n  // Rotate question types\n  const types = ['frequency', 'completeness', 'topic_vs_host'];\n  const qType = types[questions.length % types.length];\n  if (qType === 'frequency') {\n    questions.push({\n      podcast_name: podcast.name,\n      question_type: 'frequency',\n      text: `¿Con qué frecuencia escuchas *${podcast.name}*?`,\n      buttons: [['Cada episodio', 'freq_every'], ['A veces', 'freq_sometimes'], ['Raramente', 'freq_rarely'], ['Ya no lo escucho', 'freq_never']]\n    });\n  } else if (qType === 'completeness') {\n    questions.push({\n      podcast_name: podcast.name,\n      question_type: 'completeness',\n      text: `Cuando empiezas un episodio de *${podcast.name}*, ¿sueles terminarlo?`,\n      buttons: [['Siempre', 'comp_always'], ['La mayoría', 'comp_most'], ['Solo si engancha', 'comp_hooks'], ['Suelo dejarlo', 'comp_drop']]\n    });\n  } else {\n    questions.push({\n      podcast_name: podcast.name,\n      question_type: 'topic_vs_host',\n      text: `¿Qué te atrae más de *${podcast.name}*?`,\n      buttons: [['El tema principal', 'attr_topic'], ['El presentador', 'attr_host'], ['Los invitados', 'attr_guests'], ['Todo', 'attr_all']]\n    });\n  }\n}\n// Mark as asked\nfor (const q of questions) {\n  state.questions_asked.push({podcast_name: q.podcast_name, question_type: q.question_type, day: state.survey_day});\n}\nfs.writeFileSync('/data/onboarding_state.json', JSON.stringify(state, null, 2));\nreturn questions.map(q => ({json: q}));"
+      },
+      "id": "b1a2c3d4-0014-0014-0014-000000000014",
+      "name": "Schedule Survey",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [2440, 560]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{$env.TELEGRAM_CHAT_ID}}",
+        "text": "={{$json.text}}",
+        "additionalFields": {
+          "parse_mode": "Markdown",
+          "reply_markup": "={\"inline_keyboard\": [{{$json.buttons.map(b => [{\"text\": b[0], \"callback_data\": \"survey:\" + b[1] + \":\" + $json.podcast_name.slice(0,20)}}])}}]}"
+        }
+      },
+      "id": "b1a2c3d4-0015-0015-0015-000000000015",
+      "name": "Send Survey Questions",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [2660, 560],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram_creds",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "survey-answer",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "b1a2c3d4-0016-0016-0016-000000000016",
+      "name": "Handle Survey Answers",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [2440, 720]
+    },
+    {
+      "parameters": {
+        "functionCode": "const fs = require('fs');\nconst callbackData = $input.first().json.callback_query?.data || '';\n// Format: survey:{answer_code}:{podcast_name_partial}\nconst parts = callbackData.split(':');\nif (parts[0] !== 'survey' || parts.length < 3) return [{json: {skip: true}}];\nconst answerCode = parts[1];\nconst podcastPartial = parts.slice(2).join(':');\nconst statePath = '/data/onboarding_state.json';\nconst state = JSON.parse(fs.readFileSync(statePath, 'utf8'));\nstate.questions_answered.push({answer_code: answerCode, podcast_partial: podcastPartial, answered_at: new Date().toISOString()});\nfs.writeFileSync(statePath, JSON.stringify(state, null, 2));\nconst allAnswered = state.questions_asked.length <= state.questions_answered.length;\nreturn [{json: {answer_code: answerCode, podcast_partial: podcastPartial, all_answered: allAnswered, state}}];"
+      },
+      "id": "b1a2c3d4-0017-0017-0017-000000000017",
+      "name": "Store Survey Answer",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [2660, 720]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {"name": "x-api-key", "value": "={{$env.ANTHROPIC_API_KEY}}"},
+            {"name": "anthropic-version", "value": "2023-06-01"},
+            {"name": "content-type", "value": "application/json"}
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"claude-sonnet-4-5\",\n  \"max_tokens\": 1024,\n  \"system\": {{JSON.stringify($('Read Onboarding Prompt').first().json.content)}},\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"Analiza estas respuestas del survey: \" + JSON.stringify($input.first().json.state.questions_answered) + \". Perfil actual: \" + $('Read Profile for Synthesis').first().json.content\n    }\n  ]\n}",
+        "options": {}
+      },
+      "id": "b1a2c3d4-0018-0018-0018-000000000018",
+      "name": "Claude Profile Synthesis",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [2880, 720]
+    },
+    {
+      "parameters": {
+        "functionCode": "const fs = require('fs');\nconst claudeResponse = $input.first().json;\nconst content = claudeResponse.content?.[0]?.text || '{}';\nlet synthesis;\ntry { synthesis = JSON.parse(content); } catch(e) {\n  const match = content.match(/\\{[\\s\\S]*\\}/);\n  synthesis = match ? JSON.parse(match[0]) : {};\n}\nconst profilePath = '/data/user_profile.json';\nconst profile = JSON.parse(fs.readFileSync(profilePath, 'utf8'));\n// Apply interest weights\nif (synthesis.interest_weights) {\n  for (const [k, v] of Object.entries(synthesis.interest_weights)) {\n    profile.interests[k] = Math.max(1, Math.min(10, v));\n  }\n}\n// Apply host affinities\nif (synthesis.host_affinities) {\n  for (const [k, v] of Object.entries(synthesis.host_affinities)) {\n    profile.host_affinities[k] = Math.max(1, Math.min(10, v));\n  }\n}\n// Apply podcast updates\nif (synthesis.podcast_updates) {\n  for (const update of synthesis.podcast_updates) {\n    const podcast = profile.known_podcasts.find(p => p.name === update.name);\n    if (podcast) {\n      podcast.priority = Math.max(1, Math.min(10, update.priority));\n      podcast.feedback.completion_rate = update.completion_rate;\n    }\n  }\n}\nprofile.onboarding_complete = true;\nprofile.last_updated = new Date().toISOString();\nfs.writeFileSync(profilePath, JSON.stringify(profile, null, 2));\n// Mark onboarding complete\nconst statePath = '/data/onboarding_state.json';\nconst state = JSON.parse(fs.readFileSync(statePath, 'utf8'));\nstate.completed = true;\nfs.writeFileSync(statePath, JSON.stringify(state, null, 2));\nreturn [{json: {summary: synthesis.summary_for_user || 'Perfil actualizado.', profile_path: profilePath}}];"
+      },
+      "id": "b1a2c3d4-0019-0019-0019-000000000019",
+      "name": "Save Final Profile",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [3100, 720]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{$env.TELEGRAM_CHAT_ID}}",
+        "text": "=✅ *Onboarding completado*\n\n{{$json.summary}}\n\nTu primer digest llegará el próximo lunes a las 8:00.",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "b1a2c3d4-0020-0020-0020-000000000020",
+      "name": "Send Summary",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [3320, 720],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram_creds",
+          "name": "Telegram Bot"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [[{"node": "Check Onboarding State", "type": "main", "index": 0}]]
+    },
+    "Check Onboarding State": {
+      "main": [[{"node": "Already Complete?", "type": "main", "index": 0}]]
+    },
+    "Already Complete?": {
+      "main": [
+        [],
+        [{"node": "Generate Spotify Auth URL", "type": "main", "index": 0}]
+      ]
+    },
+    "Generate Spotify Auth URL": {
+      "main": [[{"node": "Send Auth Link", "type": "main", "index": 0}]]
+    },
+    "Spotify Callback Webhook": {
+      "main": [[{"node": "Prepare Token Exchange", "type": "main", "index": 0}]]
+    },
+    "Prepare Token Exchange": {
+      "main": [[{"node": "Exchange Code for Token", "type": "main", "index": 0}]]
+    },
+    "Exchange Code for Token": {
+      "main": [[{"node": "Save Spotify Token", "type": "main", "index": 0}]]
+    },
+    "Save Spotify Token": {
+      "main": [
+        [
+          {"node": "Fetch Followed Podcasts", "type": "main", "index": 0},
+          {"node": "Fetch Play History", "type": "main", "index": 0}
+        ]
+      ]
+    },
+    "Fetch Followed Podcasts": {
+      "main": [[{"node": "Prepare RSS Lookup", "type": "main", "index": 0}]]
+    },
+    "Prepare RSS Lookup": {
+      "main": [[{"node": "Populate Profile", "type": "main", "index": 0}]]
+    },
+    "Populate Profile": {
+      "main": [[{"node": "Schedule Survey", "type": "main", "index": 0}]]
+    },
+    "Schedule Survey": {
+      "main": [[{"node": "Send Survey Questions", "type": "main", "index": 0}]]
+    },
+    "Handle Survey Answers": {
+      "main": [[{"node": "Store Survey Answer", "type": "main", "index": 0}]]
+    },
+    "Store Survey Answer": {
+      "main": [[{"node": "Claude Profile Synthesis", "type": "main", "index": 0}]]
+    },
+    "Claude Profile Synthesis": {
+      "main": [[{"node": "Save Final Profile", "type": "main", "index": 0}]]
+    },
+    "Save Final Profile": {
+      "main": [[{"node": "Send Summary", "type": "main", "index": 0}]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "id": "v0-onboarding-workflow",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

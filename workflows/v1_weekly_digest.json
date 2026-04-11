@@ -1,0 +1,330 @@
+{
+  "name": "V1 - Weekly Digest",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * 1"
+            }
+          ]
+        }
+      },
+      "id": "c2b3d4e5-0001-0001-0001-000000000001",
+      "name": "Cron Monday 08:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "const fs = require('fs');\nconst profile = JSON.parse(fs.readFileSync('/data/user_profile.json', 'utf8'));\nconst ratingsHistory = JSON.parse(fs.readFileSync('/data/ratings_history.json', 'utf8'));\nreturn [{json: {profile, ratingsHistory}}];"
+      },
+      "id": "c2b3d4e5-0002-0002-0002-000000000002",
+      "name": "Read Profile",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "const profile = $input.first().json.profile;\n// Build list of RSS URLs to fetch\nconst rssItems = profile.known_podcasts\n  .filter(p => p.rss_url && p.priority >= 3)\n  .map(p => ({name: p.name, url: p.rss_url, priority: p.priority}));\n// Add websites\nconst websites = (profile.websites || []).filter(w => w.type === 'rss' && w.priority >= 4);\nreturn [...rssItems, ...websites].map(item => ({json: item}));"
+      },
+      "id": "c2b3d4e5-0003-0003-0003-000000000003",
+      "name": "Parse RSS Sources",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{$json.url}}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "c2b3d4e5-0004-0004-0004-000000000004",
+      "name": "Fetch RSS Feeds",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Filter episodes from last 7 days and format\nconst sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);\nconst items = $input.all();\nconst episodes = [];\nfor (const item of items) {\n  const pub = new Date(item.json.pubDate || item.json.isoDate || 0);\n  if (pub >= sevenDaysAgo) {\n    const durationStr = item.json.itunes?.duration || '0';\n    let durationMin = 0;\n    if (durationStr.includes(':')) {\n      const parts = durationStr.split(':').map(Number);\n      durationMin = parts.length === 3 ? parts[0] * 60 + parts[1] : parts[0];\n    } else {\n      durationMin = Math.floor(parseInt(durationStr) / 60);\n    }\n    episodes.push({\n      id: 'podcast_' + Buffer.from(item.json.link || item.json.title || '').toString('base64').slice(0, 12),\n      type: 'podcast',\n      title: item.json.title,\n      description: item.json.contentSnippet || item.json.content || '',\n      duration_minutes: durationMin,\n      url: item.json.link,\n      feed_name: item.json.feedUrl || '',\n      published_at: item.json.pubDate\n    });\n  }\n}\nreturn episodes.map(e => ({json: e}));"
+      },
+      "id": "c2b3d4e5-0005-0005-0005-000000000005",
+      "name": "Filter Last 7 Days",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Listen Notes discovery\nconst profile = $('Read Profile').first().json.profile;\nconst interests = profile.interests || {};\nconst topTopics = Object.entries(interests)\n  .sort((a, b) => b[1] - a[1])\n  .slice(0, 3)\n  .map(([k]) => k.replace(/_/g, ' '));\nreturn topTopics.map(term => ({json: {search_term: term}}));"
+      },
+      "id": "c2b3d4e5-0006-0006-0006-000000000006",
+      "name": "Build Discovery Terms",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [680, 480]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://listen-api.listennotes.com/api/v2/search?q={{encodeURIComponent($json.search_term)}}&type=episode&only_in=title,description&language=English,Spanish&len_min=10&len_max=90&published_after={{Math.floor((Date.now() - 7*24*60*60*1000)/1000)}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {"name": "X-ListenAPI-Key", "value": "={{$env.LISTENNOTES_API_KEY}}"}
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "c2b3d4e5-0007-0007-0007-000000000007",
+      "name": "Discover ListenNotes",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [900, 420]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.podcastindex.org/api/1.0/search/byterm?q={{encodeURIComponent($json.search_term)}}&max=5&clean",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {"name": "X-Auth-Key", "value": "={{$env.PODCASTINDEX_API_KEY}}"},
+            {"name": "X-Auth-Date", "value": "={{Math.floor(Date.now()/1000)}}"},
+            {"name": "Authorization", "value": "=sha1:{{require('crypto').createHash('sha1').update($env.PODCASTINDEX_API_KEY + $env.PODCASTINDEX_API_SECRET + Math.floor(Date.now()/1000)).digest('hex')}}"},
+            {"name": "User-Agent", "value": "ContentCurator/1.0"}
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "c2b3d4e5-0008-0008-0008-000000000008",
+      "name": "Discover PodcastIndex",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [900, 540]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://itunes.apple.com/search?term={{encodeURIComponent($json.search_term)}}&media=podcast&entity=podcastEpisode&limit=5&country=es",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "c2b3d4e5-0009-0009-0009-000000000009",
+      "name": "Discover iTunes",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [900, 660]
+    },
+    {
+      "parameters": {
+        "functionCode": "const profile = $('Read Profile').first().json.profile;\nconst knownNames = new Set(profile.known_podcasts.map(p => p.name.toLowerCase()));\nconst allDiscovered = [];\n// Process ListenNotes results\nconst lnItems = $('Discover ListenNotes').all();\nfor (const item of lnItems) {\n  const results = item.json.results || [];\n  for (const ep of results) {\n    const podName = ep.podcast?.title_original || ep.podcast?.title || '';\n    if (knownNames.has(podName.toLowerCase())) continue;\n    allDiscovered.push({\n      id: 'disc_ln_' + (ep.id || '').slice(0, 12),\n      type: 'podcast',\n      title: ep.title_original || ep.title || '',\n      description: ep.description_original || ep.description || '',\n      duration_minutes: Math.floor((ep.audio_length_sec || 0) / 60),\n      url: ep.link || ep.audio || '',\n      feed_name: podName,\n      published_at: ep.pub_date_ms ? new Date(ep.pub_date_ms).toISOString() : null,\n      is_discovery: true,\n      source: 'listennotes'\n    });\n  }\n}\n// Process PodcastIndex results\nconst piItems = $('Discover PodcastIndex').all();\nfor (const item of piItems) {\n  const feeds = item.json.feeds || [];\n  for (const feed of feeds) {\n    if (knownNames.has((feed.title || '').toLowerCase())) continue;\n    allDiscovered.push({\n      id: 'disc_pi_' + (feed.id || '').toString().slice(0, 12),\n      type: 'podcast',\n      title: feed.title || '',\n      description: feed.description || '',\n      duration_minutes: 45,\n      url: feed.link || feed.url || '',\n      feed_name: feed.title || '',\n      published_at: feed.lastUpdateTime ? new Date(feed.lastUpdateTime * 1000).toISOString() : null,\n      is_discovery: true,\n      source: 'podcastindex'\n    });\n  }\n}\n// Deduplicate by normalized name\nconst seen = new Set();\nconst unique = allDiscovered.filter(item => {\n  const key = item.feed_name.toLowerCase().trim();\n  if (seen.has(key)) return false;\n  seen.add(key);\n  return true;\n});\nreturn unique.map(item => ({json: item}));"
+      },
+      "id": "c2b3d4e5-0010-0010-0010-000000000010",
+      "name": "Merge & Deduplicate Discoveries",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1120, 540]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://www.googleapis.com/youtube/v3/search?part=snippet&q={{encodeURIComponent($('Build Discovery Terms').first().json.search_term)}}&type=video&publishedAfter={{new Date(Date.now()-7*24*60*60*1000).toISOString()}}&maxResults=10&key={{$env.YOUTUBE_API_KEY}}&relevanceLanguage=es&order=relevance",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "c2b3d4e5-0011-0011-0011-000000000011",
+      "name": "YouTube Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [900, 780]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Format YouTube results\nconst items = $input.all();\nconst videos = [];\nfor (const item of items) {\n  const results = item.json.items || [];\n  for (const video of results) {\n    videos.push({\n      id: 'yt_' + (video.id?.videoId || ''),\n      type: 'youtube',\n      title: video.snippet?.title || '',\n      description: video.snippet?.description || '',\n      duration_minutes: 0,\n      url: `https://www.youtube.com/watch?v=${video.id?.videoId}`,\n      feed_name: video.snippet?.channelTitle || '',\n      published_at: video.snippet?.publishedAt,\n      is_discovery: false,\n      thumbnail: video.snippet?.thumbnails?.medium?.url\n    });\n  }\n}\nreturn videos.map(v => ({json: v}));"
+      },
+      "id": "c2b3d4e5-0012-0012-0012-000000000012",
+      "name": "Format YouTube Results",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1120, 780]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Assemble all content for Claude\nconst profile = $('Read Profile').first().json.profile;\nconst ratingsHistory = $('Read Profile').first().json.ratingsHistory;\nconst rssItems = $('Filter Last 7 Days').all().map(i => i.json);\nconst discoveryItems = $('Merge & Deduplicate Discoveries').all().map(i => i.json);\nconst youtubeItems = $('Format YouTube Results').all().map(i => i.json);\nconst allItems = [...rssItems, ...discoveryItems, ...youtubeItems];\nreturn [{\n  json: {\n    profile,\n    ratingsHistory,\n    content_items: allItems,\n    week_number: Math.ceil((new Date() - new Date(new Date().getFullYear(), 0, 1)) / (7 * 24 * 60 * 60 * 1000))\n  }\n}];"
+      },
+      "id": "c2b3d4e5-0013-0013-0013-000000000013",
+      "name": "Prepare Claude Payload",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1340, 480]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {"name": "x-api-key", "value": "={{$env.ANTHROPIC_API_KEY}}"},
+            {"name": "anthropic-version", "value": "2023-06-01"},
+            {"name": "content-type", "value": "application/json"}
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"claude-sonnet-4-5\",\n  \"max_tokens\": 4096,\n  \"system\": \"Eres un curador personal de contenidos. Filtra, puntúa y resume episodios/vídeos según el perfil del usuario. Devuelve JSON válido con la estructura especificada en el system prompt. Sin texto adicional fuera del JSON.\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"Perfil: \" + JSON.stringify($json.profile) + \"\\n\\nContenido: \" + JSON.stringify($json.content_items) + \"\\n\\nHistorial de ratings: \" + JSON.stringify($json.ratingsHistory) + \"\\n\\nSemana: \" + $json.week_number + \"\\n\\nDevuelve JSON con estructura: {week_number, items: [{id, type, title, feed_name, duration_minutes, score, summary, recommendation_reason, url, is_discovery}]}\"\n    }\n  ]\n}",
+        "options": {}
+      },
+      "id": "c2b3d4e5-0014-0014-0014-000000000014",
+      "name": "Claude Filter & Score",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1560, 480]
+    },
+    {
+      "parameters": {
+        "functionCode": "const fs = require('fs');\nconst claudeResponse = $input.first().json;\nconst content = claudeResponse.content?.[0]?.text || '{}';\nlet digest;\ntry { digest = JSON.parse(content); } catch(e) {\n  const match = content.match(/\\{[\\s\\S]*\\}/);\n  digest = match ? JSON.parse(match[0]) : {week_number: 0, items: []};\n}\ndigest.generated_at = new Date().toISOString();\nfs.writeFileSync('/data/last_digest.json', JSON.stringify(digest, null, 2));\nreturn [{json: digest}];"
+      },
+      "id": "c2b3d4e5-0015-0015-0015-000000000015",
+      "name": "Save Last Digest",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1780, 480]
+    },
+    {
+      "parameters": {
+        "functionCode": "const digest = $input.first().json;\nconst items = digest.items || [];\nconst weekNum = digest.week_number || 0;\n\n// Group by type\nconst knownPodcasts = items.filter(i => i.type === 'podcast' && !i.is_discovery);\nconst discoveries = items.filter(i => i.type === 'podcast' && i.is_discovery);\nconst youtubeItems = items.filter(i => i.type === 'youtube');\nconst articles = items.filter(i => i.type === 'article');\n\nconst telegramMessages = [];\n\nfunction makeButtons(item) {\n  const id = item.id.slice(0, 20);\n  const type = item.type === 'youtube' ? 'youtube' : 'podcast';\n  return {\n    inline_keyboard: [[\n      {text: '👍 Bien', callback_data: `like:${type}:${id}`},\n      {text: '👎 No era para mí', callback_data: `dislike:${type}:${id}`},\n      {text: '⭐ Puntuar', callback_data: `rate:${type}:${id}`},\n      {text: '💬 Más info', callback_data: `info:${type}:${id}`}\n    ]]\n  };\n}\n\nlet headerText = `📬 *Digest — semana ${weekNum}*\\n`;\n\nif (knownPodcasts.length > 0) {\n  headerText += `\\n🎙️ *PODCASTS CONOCIDOS* (${knownPodcasts.length})\\n`;\n  for (const item of knownPodcasts) {\n    headerText += `• *${item.title}* — ${item.feed_name} · ${item.duration_minutes}min · ⭐${item.score}/10\\n  _${item.summary}_\\n  🔗 ${item.url}\\n`;\n  }\n}\n\nif (discoveries.length > 0) {\n  headerText += `\\n🔍 *DESCUBRIMIENTOS* (${discoveries.length})\\n`;\n  for (const item of discoveries) {\n    headerText += `• *${item.title}* — _Nuevo: ${item.feed_name}_ · ${item.duration_minutes}min · ⭐${item.score}/10\\n  _Por qué: ${item.recommendation_reason}_\\n  🔗 ${item.url}\\n`;\n  }\n}\n\nif (youtubeItems.length > 0) {\n  headerText += `\\n📺 *YOUTUBE* (${youtubeItems.length})\\n`;\n  for (const item of youtubeItems) {\n    headerText += `• *${item.title}* — ${item.feed_name} · ⭐${item.score}/10\\n  🔗 ${item.url}\\n`;\n  }\n}\n\nif (articles.length > 0) {\n  headerText += `\\n🌐 *ARTÍCULOS* (${articles.length})\\n`;\n  for (const item of articles) {\n    headerText += `• *${item.title}* — ${item.feed_name} · ⭐${item.score}/10\\n`;\n  }\n}\n\nheaderText += `\\n📅 *AGENDA*\\n_Calculando sugerencias de calendario..._`;\n\n// First message: full digest text\ntelegramMessages.push({\n  text: headerText,\n  reply_markup: null,\n  is_header: true\n});\n\n// Individual item messages with buttons\nfor (const item of items) {\n  telegramMessages.push({\n    text: `_Feedback para: ${item.title.slice(0, 50)}_`,\n    reply_markup: JSON.stringify(makeButtons(item)),\n    item_id: item.id,\n    is_header: false\n  });\n}\n\nreturn telegramMessages.map(msg => ({json: msg}));"
+      },
+      "id": "c2b3d4e5-0016-0016-0016-000000000016",
+      "name": "Format Telegram with Buttons",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [2000, 480]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{$env.TELEGRAM_CHAT_ID}}",
+        "text": "={{$json.text}}",
+        "additionalFields": {
+          "parse_mode": "Markdown",
+          "reply_markup": "={{$json.reply_markup}}"
+        }
+      },
+      "id": "c2b3d4e5-0017-0017-0017-000000000017",
+      "name": "Send Telegram Digest",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [2220, 480],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram_creds",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.N8N_WEBHOOK_URL}}/webhook/calendar-suggestions",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"digest_path\": \"/data/last_digest.json\", \"trigger\": \"weekly_digest\"}",
+        "options": {}
+      },
+      "id": "c2b3d4e5-0018-0018-0018-000000000018",
+      "name": "Trigger V3 Calendar",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [2440, 480]
+    }
+  ],
+  "connections": {
+    "Cron Monday 08:00": {
+      "main": [[{"node": "Read Profile", "type": "main", "index": 0}]]
+    },
+    "Read Profile": {
+      "main": [
+        [
+          {"node": "Parse RSS Sources", "type": "main", "index": 0},
+          {"node": "Build Discovery Terms", "type": "main", "index": 0}
+        ]
+      ]
+    },
+    "Parse RSS Sources": {
+      "main": [[{"node": "Fetch RSS Feeds", "type": "main", "index": 0}]]
+    },
+    "Fetch RSS Feeds": {
+      "main": [[{"node": "Filter Last 7 Days", "type": "main", "index": 0}]]
+    },
+    "Build Discovery Terms": {
+      "main": [
+        [
+          {"node": "Discover ListenNotes", "type": "main", "index": 0},
+          {"node": "Discover PodcastIndex", "type": "main", "index": 0},
+          {"node": "Discover iTunes", "type": "main", "index": 0},
+          {"node": "YouTube Search", "type": "main", "index": 0}
+        ]
+      ]
+    },
+    "Discover ListenNotes": {
+      "main": [[{"node": "Merge & Deduplicate Discoveries", "type": "main", "index": 0}]]
+    },
+    "Discover PodcastIndex": {
+      "main": [[{"node": "Merge & Deduplicate Discoveries", "type": "main", "index": 0}]]
+    },
+    "Discover iTunes": {
+      "main": [[{"node": "Merge & Deduplicate Discoveries", "type": "main", "index": 0}]]
+    },
+    "Merge & Deduplicate Discoveries": {
+      "main": [[{"node": "Prepare Claude Payload", "type": "main", "index": 0}]]
+    },
+    "Filter Last 7 Days": {
+      "main": [[{"node": "Prepare Claude Payload", "type": "main", "index": 0}]]
+    },
+    "YouTube Search": {
+      "main": [[{"node": "Format YouTube Results", "type": "main", "index": 0}]]
+    },
+    "Format YouTube Results": {
+      "main": [[{"node": "Prepare Claude Payload", "type": "main", "index": 0}]]
+    },
+    "Prepare Claude Payload": {
+      "main": [[{"node": "Claude Filter & Score", "type": "main", "index": 0}]]
+    },
+    "Claude Filter & Score": {
+      "main": [[{"node": "Save Last Digest", "type": "main", "index": 0}]]
+    },
+    "Save Last Digest": {
+      "main": [[{"node": "Format Telegram with Buttons", "type": "main", "index": 0}]]
+    },
+    "Format Telegram with Buttons": {
+      "main": [[{"node": "Send Telegram Digest", "type": "main", "index": 0}]]
+    },
+    "Send Telegram Digest": {
+      "main": [[{"node": "Trigger V3 Calendar", "type": "main", "index": 0}]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "id": "v1-weekly-digest-workflow",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}
