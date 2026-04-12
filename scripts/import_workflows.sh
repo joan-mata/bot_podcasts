@@ -25,11 +25,10 @@ else
 fi
 
 N8N_URL="http://localhost:${N8N_PORT:-5678}"
-N8N_USER="${N8N_BASIC_AUTH_USER:-admin}"
-N8N_PASS="${N8N_BASIC_AUTH_PASSWORD:-}"
+N8N_API_KEY="${N8N_API_KEY:-}"
 
-if [ -z "$N8N_PASS" ]; then
-    error "N8N_BASIC_AUTH_PASSWORD no configurado en .env"
+if [ -z "$N8N_API_KEY" ]; then
+    error "N8N_API_KEY no configurado en .env. Generarlo en n8n UI → Settings → API → Create API Key"
 fi
 
 # Wait for n8n
@@ -37,14 +36,7 @@ info "Verificando conectividad con n8n..."
 curl -sf "${N8N_URL}/healthz" >/dev/null 2>&1 || error "n8n no responde en ${N8N_URL}. Ejecutar setup.sh primero."
 success "n8n accesible"
 
-# Get auth token
-info "Autenticando con n8n..."
-TOKEN_RESPONSE=$(curl -sf -X POST "${N8N_URL}/rest/login" \
-    -H "Content-Type: application/json" \
-    -d "{\"email\": \"${N8N_USER}@localhost\", \"password\": \"${N8N_PASS}\"}" 2>/dev/null || true)
-
-# Try basic auth for API calls
-API_AUTH="-u ${N8N_USER}:${N8N_PASS}"
+API_KEY_HEADER="X-N8N-API-KEY: ${N8N_API_KEY}"
 
 WORKFLOWS=(
     "v0_onboarding.json"
@@ -74,18 +66,28 @@ for i in "${!WORKFLOWS[@]}"; do
 
     info "Importando: $wf_name"
 
-    # Import via n8n REST API
-    IMPORT_RESPONSE=$(curl -sf $API_AUTH -X POST "${N8N_URL}/rest/workflows" \
+    # Import via n8n public API (v1)
+    # Strip read-only fields that cause 400 errors
+    WF_PAYLOAD=$(python3 -c "
+import json, sys
+with open('${wf_file}') as f:
+    w = json.load(f)
+for field in ['id','createdAt','updatedAt','versionId','active','meta']:
+    w.pop(field, None)
+print(json.dumps(w))
+" 2>/dev/null)
+
+    IMPORT_RESPONSE=$(echo "$WF_PAYLOAD" | curl -sf -H "$API_KEY_HEADER" -X POST "${N8N_URL}/api/v1/workflows" \
         -H "Content-Type: application/json" \
-        -d @"$wf_file" 2>/dev/null || echo '{"error": "import_failed"}')
+        -d @- 2>/dev/null || echo '{"error": "import_failed"}')
 
     if echo "$IMPORT_RESPONSE" | grep -q '"id"'; then
-        WF_ID=$(echo "$IMPORT_RESPONSE" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+        WF_ID=$(echo "$IMPORT_RESPONSE" | python3 -c "import json,sys; print(json.load(sys.stdin).get('id',''))" 2>/dev/null)
         success "Importado: $wf_name (id: $WF_ID)"
 
         # Activate workflow
         info "Activando: $wf_name"
-        ACTIVATE_RESPONSE=$(curl -sf $API_AUTH -X PATCH "${N8N_URL}/rest/workflows/${WF_ID}" \
+        ACTIVATE_RESPONSE=$(curl -sf -H "$API_KEY_HEADER" -X PATCH "${N8N_URL}/api/v1/workflows/${WF_ID}" \
             -H "Content-Type: application/json" \
             -d '{"active": true}' 2>/dev/null || echo '{"error": "activate_failed"}')
 
@@ -97,6 +99,7 @@ for i in "${!WORKFLOWS[@]}"; do
     else
         warn "Error importando $wf_name — intentar importar manualmente desde la UI n8n"
         echo "  Fichero: $wf_file"
+        echo "  Respuesta: $(echo "$IMPORT_RESPONSE" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('message','unknown'))" 2>/dev/null)"
     fi
 done
 

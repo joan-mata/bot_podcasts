@@ -78,7 +78,7 @@ else
 fi
 
 # Start local HTTP server to catch callback
-info "Esperando callback en http://localhost:${PORT}/callback ..."
+info "Esperando callback en ${REDIRECT_URI} ..."
 echo ""
 
 # Use Python to handle the callback

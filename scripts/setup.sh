@@ -89,6 +89,21 @@ if [ ! -f "$PROJECT_DIR/data/last_digest.json" ]; then
     success "last_digest.json creado"
 fi
 
+if [ ! -f "$PROJECT_DIR/data/user_profile.json" ]; then
+    cat > "$PROJECT_DIR/data/user_profile.json" <<'EOF'
+{
+  "topics": [],
+  "known_podcasts": [],
+  "websites": [],
+  "preferred_duration_minutes": 30,
+  "preferred_days": ["monday"],
+  "language": "es",
+  "discovery_terms": []
+}
+EOF
+    success "user_profile.json creado"
+fi
+
 # Start n8n
 info "Iniciando n8n con Docker Compose..."
 cd "$PROJECT_DIR"
@@ -144,13 +159,19 @@ echo -e "  ${BLUE}8. APPLE_CALDAV_USER + APPLE_CALDAV_PASSWORD${NC}"
 echo "     → Apple ID (email) + contraseña específica de app"
 echo "     → https://appleid.apple.com → Seguridad → App-Specific Passwords"
 echo ""
-echo -e "  ${BLUE}9. N8N_BASIC_AUTH_PASSWORD${NC}"
-echo "     → Elige una contraseña segura para el panel n8n"
+echo -e "  ${BLUE}9. N8N_WEBHOOK_URL${NC}"
+echo "     → URL pública HTTPS, ej: https://n8n.tudominio.com"
+echo "     → En ~/.cloudflared/config.yml añade ANTES del catch-all:"
+echo "          - hostname: n8n.tudominio.com"
+echo "            service: http://NOMBRE_CONTAINER_N8N:5678"
+echo "     → Conecta el container n8n a la red del tunnel:"
+echo "          docker network connect NOMBRE_RED_TUNNEL NOMBRE_CONTAINER_N8N"
+echo "     → Añade DNS CNAME en Cloudflare: n8n → TUNNEL_ID.cfargotunnel.com (proxy ON)"
+echo "     → Reinicia cloudflared: docker restart NOMBRE_CONTAINER_CLOUDFLARED"
 echo ""
-echo -e "  ${BLUE}10. N8N_WEBHOOK_URL${NC}"
-echo "      → URL pública HTTPS (necesaria para webhook de Telegram)"
-echo "      → Opción A (ngrok): ngrok http 5678 → copia la URL https"
-echo "      → Opción B (Cloudflare): cloudflared tunnel --url http://localhost:5678"
+echo -e "  ${BLUE}10. N8N_API_KEY${NC}"
+echo "      → Generado dentro de n8n: Settings → API → Create API Key"
+echo "      → Necesario para importar los workflows con el script"
 echo ""
 echo "────────────────────────────────────────────────────────────────────"
 echo ""
@@ -159,11 +180,11 @@ echo ""
 echo "  1. Edita .env con todas las claves de arriba"
 echo "  2. Reinicia n8n: $COMPOSE_CMD restart"
 echo "  3. Importa los workflows: bash scripts/import_workflows.sh"
-echo "  4. Conecta Spotify: bash scripts/spotify_auth.sh"
-echo "  5. Registra el webhook de Telegram:"
-echo "     curl -X POST https://api.telegram.org/bot\${TELEGRAM_BOT_TOKEN}/setWebhook \\"
-echo "       -d url=\${N8N_WEBHOOK_URL}/webhook/telegram \\"
-echo "       -d secret_token=\${TELEGRAM_WEBHOOK_SECRET}"
+echo "  4. Registra el webhook de Telegram:"
+echo "     source .env && curl -X POST https://api.telegram.org/bot\${TELEGRAM_BOT_TOKEN}/setWebhook \\"
+echo "       -H 'Content-Type: application/json' \\"
+echo "       -d \"{\\\"url\\\": \\\"\${N8N_WEBHOOK_URL}/webhook/telegram\\\", \\\"secret_token\\\": \\\"\${TELEGRAM_WEBHOOK_SECRET}\\\"}\""
+echo "  5. Conecta Spotify: bash scripts/spotify_auth.sh"
 echo "  6. Abre n8n: http://localhost:5678"
 echo "  7. Envía /onboarding a tu bot para iniciar"
 echo ""
