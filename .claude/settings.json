@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd /Users/server_user/Documents/bot_podcasts && git diff --quiet HEAD 2>/dev/null && exit 0; git add workflows/ prompts/ scripts/ docker-compose.yml CLAUDE.md AGENT.md README.md docs/ 2>/dev/null; STAGED=$(git diff --staged --name-only 2>/dev/null); [ -z \"$STAGED\" ] && exit 0; if echo \"$STAGED\" | grep -qE '^workflows/'; then TYPE=feat; elif echo \"$STAGED\" | grep -qE '^(CLAUDE\\.md|README\\.md|AGENT\\.md|docs/)'; then TYPE=docs; elif echo \"$STAGED\" | grep -qE '^scripts/'; then TYPE=chore; elif echo \"$STAGED\" | grep -qE '^docker-compose'; then TYPE=chore; else TYPE=chore; fi; SCOPE=$(echo \"$STAGED\" | sed 's|.*/||' | sed 's|\\.[^.]*$||' | sort -u | head -3 | tr '\\n' ',' | sed 's/,$//'); DESC=$(git diff --staged --stat | tail -1); git commit -m \"${TYPE}(${SCOPE}): ${DESC}\" && git push origin main 2>/dev/null || true",
+            "timeout": 30,
+            "statusMessage": "Committing and pushing changes..."
+          }
+        ]
+      }
+    ]
+  }
+}
