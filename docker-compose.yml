@@ -1,22 +1,22 @@
 services:
   n8n:
-    image: n8nio/n8n:latest
+    build: .
+    image: n8n-homelab:latest
     user: "1000:1000"
     restart: unless-stopped
     ports:
       - "127.0.0.1:5678:5678"
-    env_file: .env
+    env_file:
+      - ../shared/.env   # shared vars (ANTHROPIC_API_KEY, SPOTIFY_*, etc.)
+      - .env             # bot-specific overrides (TELEGRAM_BOT_TOKEN, N8N_API_KEY)
     environment:
-      - N8N_HOST=${N8N_HOST}
-      - N8N_PORT=${N8N_PORT}
+      # These are not in .env — set explicitly
       - N8N_PROTOCOL=https
-      - WEBHOOK_URL=${N8N_WEBHOOK_URL}
       - GENERIC_TIMEZONE=Europe/Madrid
       - TZ=Europe/Madrid
       - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
       - NODE_FUNCTION_ALLOW_BUILTIN=fs,path,crypto,https,http
-      # n8n 1.x: owner account is created on first launch via UI
-      # Generate an API key in Settings → API after first login, then set N8N_API_KEY in .env
+      - NODE_FUNCTION_ALLOW_EXTERNAL=pg
     volumes:
       - n8n_data:/home/node/.n8n
       - ./data:/data:rw

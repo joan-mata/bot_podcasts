@@ -148,12 +148,13 @@ EXPIRES_IN=$(echo "$RESPONSE" | python3 -c "import json,sys; d=json.load(sys.std
 # Save token file
 mkdir -p "$(dirname "$TOKEN_FILE")"
 python3 -c "
-import json, datetime
+import json, datetime, time
 data = {
     'access_token': '${ACCESS_TOKEN}',
     'refresh_token': '${REFRESH_TOKEN}',
     'expires_in': ${EXPIRES_IN},
-    'obtained_at': datetime.datetime.utcnow().isoformat() + 'Z'
+    'obtained_at': datetime.datetime.utcnow().isoformat() + 'Z',
+    'expires_at': int((time.time() + ${EXPIRES_IN}) * 1000)
 }
 with open('${TOKEN_FILE}', 'w') as f:
     json.dump(data, f, indent=2)

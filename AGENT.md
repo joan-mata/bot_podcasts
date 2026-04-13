@@ -148,6 +148,59 @@ Ejemplos: `like:podcast:abc123`, `rate:youtube:xyz789`, `info:podcast:abc123`
 
 ---
 
+## Comandos de episodios (base de datos)
+
+Los siguientes comandos leen y escriben en la tabla `podcasts.episodes` de PostgreSQL (no en los ficheros JSON).
+
+- `/lista` — lista compacta de episodios pendientes (solo texto, sin botones)
+- `/lista_editar` — misma lista con botones por episodio: ✅ Escuchado, 🗑 Eliminar, ✏️ Nota
+- `/episodios` — historial de episodios escuchados con valoración y fecha
+- `/sync_spotify` — sincroniza los podcasts seguidos en Spotify con la lista local
+
+## Gestión de episodios
+
+**Marcar escuchado:** actualiza `status='listened'` y `listened_at=NOW()`.
+**Eliminar:** siempre pide confirmación con botones inline antes de ejecutar. El borrado es lógico: `status='dismissed'`, nunca DELETE físico.
+**Añadir nota:** el bot pide un mensaje de texto libre; se guarda en `user_note`. El estado de espera persiste entre mensajes usando `$getWorkflowStaticData('global').waiting_note`.
+
+## Búsqueda y deduplicación
+
+Todas las comparaciones de título/show usan `podcasts.norm()` — elimina acentos, mayúsculas y caracteres especiales.
+Antes de cualquier INSERT, verificar:
+```sql
+SELECT id FROM podcasts.episodes
+WHERE podcasts.norm(title) = podcasts.norm($1)
+  AND podcasts.norm(show_name) = podcasts.norm($2)
+```
+Si ya existe: actualizar en lugar de insertar.
+
+## Auto-import por URL o nombre
+
+Cuando el usuario pega una URL o menciona contenido:
+
+**URL de Spotify** (`open.spotify.com/show/...`):
+- Obtener metadata del show via Spotify API
+- Upsert en `podcasts.spotify_shows` y `podcasts.episodes`
+- Confirmar: "Añadido: {nombre}."
+
+**URL de YouTube** (`youtube.com/watch?v=...` / `youtu.be/...`):
+- Obtener título/canal/duración via YouTube Data API
+- INSERT en `podcasts.episodes` con `source='youtube'`
+- Confirmar: "Añadido: {título} — {canal} ({N}min)."
+
+**Nombre de podcast (texto libre)**:
+- Buscar en Podcast Index + iTunes por `norm(name)`
+- Ofrecer top 3 resultados con botones inline de confirmación
+- Al seleccionar → INSERT
+
+## Interpretar reportes proactivos
+
+Cuando el usuario menciona haber escuchado o querer escuchar algo:
+1. Extraer: tipo (podcast/youtube/artículo), título, show/canal, URL si la hay, sentimiento
+2. Verificar dedup en DB por `norm(title)+norm(show_name)`
+3. INSERT si nuevo, UPDATE si ya existe (mejorar status/rating si corresponde)
+4. Confirmar al usuario en una línea
+
 ## Onboarding — síntesis de encuesta
 
 Input: lista de respuestas a preguntas del survey de Spotify.

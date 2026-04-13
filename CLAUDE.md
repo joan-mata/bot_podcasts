@@ -23,18 +23,33 @@ print(json.dumps(w))
   -X PUT -H "Content-Type: application/json" -d @-
 ```
 
-Workflow IDs (get them from n8n UI after importing, or via API):
+Workflow IDs:
+- V0 Onboarding: `mdVwyuIFTzir7lMf` (inactive)
+- V1 Weekly Digest: `NRmOwASsHutmy3TE`
+- V2 Telegram Conversation: `MfX38SzD8FwEyOKA`
+- V3 Calendar Suggestions: `pVaNArhBpubE4h6I` (inactive)
+- V4 Daily Tracker: `0u3BHLauQ3ZDWWle`
+- Recordatorios: `O4VSD9iBGMEcFFHc`
+
+## Data Storage
+
+- **Episode log** (`podcasts.episodes`): PostgreSQL, `postgres_shared` container, DB `homelab`, schema `podcasts`
+- **Spotify show cache** (`podcasts.spotify_shows`): same schema
+- **User profile / preferences**: `data/user_profile.json` (stays as JSON — preferences, not episode log)
+- **Ratings history**: `data/ratings_history.json` (stays as JSON — feedback loop for Claude scoring)
+- **n8n ↔ postgres**: both on `proxy-net` Docker network; n8n connects to `postgres_shared:5432`
+- **norm() function**: `podcasts.norm(t TEXT)` — lowercase + unaccent + strip special chars. Used for all dedup checks.
+
+To apply schema changes to running postgres:
 ```bash
-source .env && curl -s "http://localhost:5678/api/v1/workflows" \
-  -H "X-N8N-API-KEY: ${N8N_API_KEY}" | python3 -c "
-import json,sys; [print(f'{w[\"name\"]}: {w[\"id\"]}') for w in json.load(sys.stdin)['data']]
-"
+source ../shared/.env
+docker exec -i postgres_shared psql -U $POSTGRES_USER -d homelab < ../infra/postgres/init/00_schemas.sql
 ```
-- V0 Onboarding: `<your-id>`
-- V1 Weekly Digest: `<your-id>`
-- V2 Telegram Conversation: `<your-id>`
-- V3 Calendar Suggestions: `<your-id>`
-- V4 Daily Tracker: `<your-id>`
+
+To migrate `podcast_queue.json` → DB (one-time, already done):
+```bash
+bash scripts/migrate_queue_to_db.sh
+```
 
 ## Stack
 
