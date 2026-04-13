@@ -23,12 +23,18 @@ print(json.dumps(w))
   -X PUT -H "Content-Type: application/json" -d @-
 ```
 
-Workflow IDs (current instance):
-- V0 Onboarding: `mdVwyuIFTzir7lMf`
-- V1 Weekly Digest: `NRmOwASsHutmy3TE`
-- V2 Telegram Conversation: `MfX38SzD8FwEyOKA`
-- V3 Calendar Suggestions: `pVaNArhBpubE4h6I`
-- V4 Daily Tracker: `0u3BHLauQ3ZDWWle`
+Workflow IDs (get them from n8n UI after importing, or via API):
+```bash
+source .env && curl -s "http://localhost:5678/api/v1/workflows" \
+  -H "X-N8N-API-KEY: ${N8N_API_KEY}" | python3 -c "
+import json,sys; [print(f'{w[\"name\"]}: {w[\"id\"]}') for w in json.load(sys.stdin)['data']]
+"
+```
+- V0 Onboarding: `<your-id>`
+- V1 Weekly Digest: `<your-id>`
+- V2 Telegram Conversation: `<your-id>`
+- V3 Calendar Suggestions: `<your-id>`
+- V4 Daily Tracker: `<your-id>`
 
 ## Stack
 
@@ -64,7 +70,8 @@ content-curator/
 │   ├── v0_onboarding.json      ← Spotify import + progressive survey
 │   ├── v1_weekly_digest.json   ← weekly content collection + Claude filter
 │   ├── v2_telegram_conversation.json ← message handling + callback_query
-│   └── v3_calendar_suggestions.json  ← CalDAV read + slot suggestions
+│   ├── v3_calendar_suggestions.json  ← CalDAV read + slot suggestions
+│   └── v4_daily_tracker.json   ← daily new episode checker
 ├── prompts/                    ← Spanish (user-facing agent instructions)
 │   ├── weekly_digest_system.md
 │   ├── conversation_system.md
