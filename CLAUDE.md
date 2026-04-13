@@ -5,6 +5,31 @@
 Personal content curation system with feedback loop and taste learning.
 Self-hosted on Linux with Docker. No paid infrastructure.
 
+## Workflow Maintenance Rule
+
+**After every new feature or improvement to a workflow, update the JSON file in `workflows/` AND re-upload it to n8n via the API so the running instance is always in sync with the files in the repo.**
+
+Upload command:
+```bash
+source .env && python3 -c "
+import json
+with open('workflows/vX_name.json') as f:
+    w = json.load(f)
+for field in ['id','createdAt','updatedAt','versionId','active','meta']:
+    w.pop(field, None)
+print(json.dumps(w))
+" | curl -s "http://localhost:5678/api/v1/workflows/WORKFLOW_ID" \
+  -H "X-N8N-API-KEY: \${N8N_API_KEY}" \
+  -X PUT -H "Content-Type: application/json" -d @-
+```
+
+Workflow IDs (current instance):
+- V0 Onboarding: `mdVwyuIFTzir7lMf`
+- V1 Weekly Digest: `NRmOwASsHutmy3TE`
+- V2 Telegram Conversation: `MfX38SzD8FwEyOKA`
+- V3 Calendar Suggestions: `pVaNArhBpubE4h6I`
+- V4 Daily Tracker: `0u3BHLauQ3ZDWWle`
+
 ## Stack
 
 - **n8n** (Docker) — workflow orchestration

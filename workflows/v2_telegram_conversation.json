@@ -52,7 +52,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const body = $input.first().json.body || {};\nconst isCallbackQuery = !!body.callback_query;\nconst isMessage = !!body.message;\nif (isCallbackQuery) {\n  return [{\n    json: {\n      route: 'callback_query',\n      callback_query_id: body.callback_query.id,\n      callback_data: body.callback_query.data,\n      message_id: body.callback_query.message?.message_id,\n      chat_id: body.callback_query.message?.chat?.id\n    }\n  }];\n}\nif (isMessage) {\n  return [{\n    json: {\n      route: 'message',\n      text: body.message.text || '',\n      chat_id: body.message.chat?.id,\n      message_id: body.message.message_id,\n      from: body.message.from\n    }\n  }];\n}\nreturn [{json: {route: 'unknown'}}];"
+        "jsCode": "const body = $input.first().json.body || {};\nconst isCallbackQuery = !!body.callback_query;\nconst isMessage = !!body.message;\nif (isCallbackQuery) {\n  return [{json: {\n    route: 'callback_query',\n    callback_query_id: body.callback_query.id,\n    callback_data: body.callback_query.data,\n    message_id: body.callback_query.message?.message_id,\n    chat_id: body.callback_query.message?.chat?.id\n  }}];\n}\nif (isMessage) {\n  const text = body.message.text || '';\n  // Queue commands\n  if (text === '/lista' || text.startsWith('/lista ')) {\n    return [{json: {route: 'queue', queue_action: 'list', text}}];\n  }\n  if (text === '/saltados') {\n    return [{json: {route: 'queue', queue_action: 'skipped', text}}];\n  }\n  if (/^\\/a[\u00f1n]adir?\\s+/i.test(text) || text.startsWith('/add ')) {\n    const title = text.replace(/^\\/a[\u00f1n]adir?\\s+|^\\/add\\s+/i, '').trim();\n    return [{json: {route: 'queue', queue_action: 'add', queue_title: title, text}}];\n  }\n  // Podcast commands\n  if (text === '/podcasts') {\n    return [{json: {route: 'podcasts', podcasts_action: 'list', text}}];\n  }\n  if (text.startsWith('/follow ')) {\n    const raw = text.replace('/follow ', '').trim();\n    const queries = raw.split(/[,\\n]+/).map(s => s.trim()).filter(Boolean);\n    if (queries.length > 1) {\n      return [{json: {route: 'podcasts', podcasts_action: 'follow_multi', queries, text}}];\n    }\n    return [{json: {route: 'podcasts', podcasts_action: 'follow', query: queries[0] || raw, text}}];\n  }\n  if (text.startsWith('/unfollow ')) {\n    const query = text.replace('/unfollow ', '').trim();\n    return [{json: {route: 'podcasts', podcasts_action: 'unfollow', query, text}}];\n  }\n  if (/^\\/rename\\s/.test(text)) {\n    const rest = text.replace(/^\\/rename\\s+/, '').trim();\n    const spaceIdx = rest.search(/\\s/);\n    if (spaceIdx > 0) {\n      const first = rest.slice(0, spaceIdx);\n      const new_name = rest.slice(spaceIdx + 1).trim();\n      const podcast_idx = parseInt(first, 10);\n      if (!isNaN(podcast_idx) && new_name) {\n        return [{json: {route: 'podcasts', podcasts_action: 'rename', podcast_idx: podcast_idx - 1, new_name, text}}];\n      }\n    }\n    return [{json: {route: 'podcasts', podcasts_action: 'rename_help', text}}];\n  }\n  if (text === '/ayuda' || text === '/help') {\n    return [{json: {route: 'podcasts', podcasts_action: 'help', text}}];\n  }\n  // Episode browse commands\n  if (/^\\/[uú]ltimos?\\s/.test(text)) {\n    const parts = text.replace(/^\\/[uú]ltimos?\\s+/, '').trim().split(/\\s+/);\n    const n = parseInt(parts[0], 10);\n    const episode_count = isNaN(n) ? 3 : n;\n    const podcast_filter = isNaN(n) ? parts.join(' ') : parts.slice(1).join(' ');\n    return [{json: {route: 'episodes', episodes_action: 'bulk_add', episode_count, podcast_filter, text}}];\n  }\n  if (/^\\/elegir\\s/.test(text)) {\n    const parts = text.replace(/^\\/elegir\\s+/, '').trim().split(/\\s+/);\n    const n = parseInt(parts[0], 10);\n    const episode_count = isNaN(n) ? 5 : n;\n    const podcast_filter = isNaN(n) ? parts.join(' ') : parts.slice(1).join(' ');\n    return [{json: {route: 'episodes', episodes_action: 'browse', episode_count, podcast_filter, text}}];\n  }\n  if (/^\\/desde\\s/.test(text)) {\n    return [{json: {route: 'episodes', episodes_action: 'browse_range', episode_count: 50, podcast_filter: '', raw_text: text, text}}];\n  }\n  if (/^\\/recomienda/.test(text)) {\n    const n = parseInt((text.split(/\\s+/)[1] || ''), 10);\n    return [{json: {route: 'recommend', recommend_count: isNaN(n) || n < 1 ? 3 : Math.min(n, 10), text}}];\n  }\n  return [{json: {\n    route: 'message',\n    text,\n    chat_id: body.message.chat?.id,\n    message_id: body.message.message_id\n  }}];\n}\nreturn [{json: {route: 'unknown'}}];"
       },
       "id": "d3c4e5f6-0004-0004-0004-000000000004",
       "name": "Route by Type",
@@ -95,7 +95,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Parse callback_data format: {action}:{type}:{item_id}\nconst data = $input.first().json.callback_data || '';\nconst parts = data.split(':');\nif (parts.length < 3) return [{json: {action: 'unknown', item_type: 'unknown', item_id: 'unknown', original: data}}];\nconst [action, item_type, ...idParts] = parts;\nconst item_id = idParts.join(':');\nreturn [{json: {\n  action,\n  item_type,\n  item_id,\n  callback_query_id: $input.first().json.callback_query_id,\n  message_id: $input.first().json.message_id,\n  chat_id: $input.first().json.chat_id\n}}];"
+        "jsCode": "const data = $input.first().json.callback_data || '';\nconst parts = data.split(':');\nconst action = parts[0];\nconst inp = $input.first().json;\n\n// Queue callback: q_add:{item_id} | q_done:{id} | q_skip:{id} | q_del:{id} | q_rate:{id}:{0-5}\nif (action.startsWith('q_')) {\n  return [{json: {\n    action,\n    item_id: parts[1] || '',\n    queue_rating: parts[2] !== undefined ? parseInt(parts[2], 10) : null,\n    callback_query_id: inp.callback_query_id,\n    message_id: inp.message_id,\n    chat_id: inp.chat_id,\n    is_queue: true,\n    is_podcasts: false\n  }}];\n}\n\n// Podcasts callbacks: p_del:{index}, pf_choose:{id}, pf_none\nif (action.startsWith('p_') || action.startsWith('pf_')) {\n  return [{json: {\n    action,\n    item_id: parts[1] || '',\n    callback_query_id: inp.callback_query_id,\n    message_id: inp.message_id,\n    chat_id: inp.chat_id,\n    is_queue: false,\n    is_podcasts: true\n  }}];\n}\n\n// Episode browse skip callback\nif (action === 'eb_skip') {\n  return [{json: {\n    action: 'eb_skip', item_id: parts[1] || '',\n    callback_query_id: inp.callback_query_id,\n    message_id: inp.message_id, chat_id: inp.chat_id,\n    is_queue: true, is_podcasts: false\n  }}];\n}\n\n// Standard: {action}:{type}:{item_id}\nif (parts.length < 3) return [{json: {action: 'unknown', item_type: 'unknown', item_id: 'unknown', original: data, callback_query_id: inp.callback_query_id, message_id: inp.message_id, chat_id: inp.chat_id, is_queue: false, is_podcasts: false}}];\nconst [act, item_type, ...idParts] = parts;\nreturn [{json: {\n  action: act,\n  item_type,\n  item_id: idParts.join(':'),\n  callback_query_id: inp.callback_query_id,\n  message_id: inp.message_id,\n  chat_id: inp.chat_id,\n  is_queue: false,\n  is_podcasts: false\n}}];"
       },
       "id": "d3c4e5f6-0006-0006-0006-000000000006",
       "name": "Parse Callback Data",
@@ -116,11 +116,11 @@
           },
           "conditions": [
             {
-              "leftValue": "={{ $json.action }}",
-              "rightValue": "rate",
+              "leftValue": "={{ $json.is_queue }}",
+              "rightValue": true,
               "operator": {
-                "type": "string",
-                "operation": "equals"
+                "type": "boolean",
+                "operation": "true"
               }
             }
           ],
@@ -128,7 +128,7 @@
         }
       },
       "id": "d3c4e5f6-0007-0007-0007-000000000007",
-      "name": "Switch Action",
+      "name": "Is Queue Callback?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [
@@ -340,6 +340,257 @@
         2660,
         400
       ]
+    },
+    {
+      "id": "queue-0001-0001-0001-000000000001",
+      "name": "Is Rate?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        280
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "rate",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "queue-0002-0002-0002-000000000002",
+      "name": "Is Queue?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1340,
+        500
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.route }}",
+              "rightValue": "queue",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "queue-0003-0003-0003-000000000003",
+      "name": "Handle Queue",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        1780,
+        600
+      ],
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst inp = $input.first().json;\nconst queuePath = '/data/podcast_queue.json';\n\nlet queue = {items: []};\ntry { queue = JSON.parse(fs.readFileSync(queuePath, 'utf8')); } catch(e) {}\nconst saveQueue = () => fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2));\n\n// Normalize action from either path\nconst action = inp.queue_action || inp.action || 'list';\nconst itemId  = inp.item_id || '';\nconst cbId    = inp.callback_query_id || null;\n\n// LIST — one message per episode so buttons appear next to each title\nif (action === 'list') {\n  const pending = queue.items.filter(i => i.status === 'pending');\n  if (!pending.length) {\n    return [{json: {reply_text: '\ud83d\udccb *Tu lista de escucha est\u00e1 vac\u00eda*\\n\\nUsa \ud83d\udccb en el digest para a\u00f1adir episodios, o escr\u00edbeme\\n`/add Nombre del episodio`', reply_markup: null, callback_query_id: cbId, answer_text: null}}];\n  }\n  const epNumRe = /\\bEp\\.?\\s*(\\d+)\\b|\\b#(\\d+)\\b|\\bEpisode\\s+(\\d+)\\b|\\bCap\\.?\\s*(\\d+)\\b/i;\n  const result = [];\n  const slice = pending.slice(0, 8);\n  slice.forEach((item, i) => {\n    const dur = item.duration_min ? ` \u00b7 ${item.duration_min}min` : '';\n    const m = item.title.match(epNumRe);\n    const epTag = m ? ` \u00b7 #${m[1]||m[2]||m[3]||m[4]}` : '';\n    const header = i === 0 ? `\ud83d\udccb *Lista de escucha* (${pending.length} pendiente${pending.length!==1?'s':''})\\n\\n` : '';\n    const text = `${header}*${i+1}.* *${item.title}*${epTag}\\n_${item.podcast || 'Podcast'}${dur}_`;\n    const row = [\n      {text: '\u2705 Escuchado', callback_data: `q_done:${item.id}`},\n      {text: '\u23ed Saltar',    callback_data: `q_skip:${item.id}`},\n      {text: '\ud83d\uddd1',           callback_data: `q_del:${item.id}`}\n    ];\n    if (item.url) row.push({text: '\ud83d\udd17', url: item.url});\n    result.push({json: {reply_text: text, reply_markup: JSON.stringify({inline_keyboard: [row]}), callback_query_id: cbId, answer_text: null}});\n  });\n  if (pending.length > 8) result.push({json: {reply_text: `_...y ${pending.length - 8} episodios m\u00e1s_`, reply_markup: null, callback_query_id: cbId, answer_text: null}});\n  return result;\n}\n\n// ADD (from /add command or from \ud83d\udccb digest button)\nif (action === 'add' || action === 'q_add') {\n  // From digest button: inp has item data stored in digest\n  let title = inp.queue_title || inp.text || 'Sin t\u00edtulo';\n  let podcast = inp.queue_podcast || '';\n  let url = inp.queue_url || '';\n  let duration = inp.queue_duration || null;\n  let source = inp.queue_source || 'manual';\n\n  // Try to find item data from last_digest if coming from q_add callback\n  if (action === 'q_add' && itemId) {\n    try {\n      const digest = JSON.parse(fs.readFileSync('/data/last_digest.json', 'utf8'));\n      const found = (digest.items || []).find(i => i.id === itemId || i.id.startsWith(itemId));\n      if (found) { title = found.title; podcast = found.feed_name || ''; url = found.url || ''; duration = found.duration_minutes || null; source = 'digest'; }\n    } catch(e) {}\n    // Fallback: check V4 daily tracker episodes cache\n    if (title === 'Sin t\\u00edtulo' || !title) {\n      try {\n        const v4Cache = JSON.parse(fs.readFileSync('/data/v4_episodes_cache.json', 'utf8'));\n        const found = v4Cache[itemId];\n        if (found) { title = found.title; podcast = found.podcast; url = found.url; duration = found.duration_min; source = 'daily_tracker'; }\n      } catch(e) {}\n    }\n    // Fallback: check episode browse cache (from /elegir, /desde commands)\n    if (itemId.startsWith('eb') && (title === 'Sin t\\u00edtulo' || !title)) {\n      try {\n        const browseCache = JSON.parse(fs.readFileSync('/data/episode_browse_cache.json', 'utf8'));\n        const found = browseCache[itemId];\n        if (found) { title = found.title; podcast = found.podcast; url = found.url; duration = found.duration_min; source = 'browse'; }\n      } catch(e) {}\n    }\n  }\n\n  // Avoid duplicates\n  const exists = queue.items.find(i => i.title === title && i.status === 'pending');\n  if (exists) {\n    return [{json: {reply_text: `\ud83d\udccb *${title}* ya est\u00e1 en tu lista`, reply_markup: null, callback_query_id: cbId, answer_text: 'Ya en la lista'}}];\n  }\n\n  const newItem = {\n    id: 'q' + Date.now().toString(36).slice(-8),\n    title, podcast, url,\n    duration_min: duration,\n    source,\n    added_at: new Date().toISOString(),\n    status: 'pending',\n    rating: null\n  };\n  queue.items.push(newItem);\n  saveQueue();\n  // Mark browse episode as seen so /elegir won't re-show it\n  if (itemId && itemId.startsWith('eb')) {\n    try {\n      const cachePath = '/data/episode_browse_cache.json';\n      const bc = JSON.parse(fs.readFileSync(cachePath, 'utf8'));\n      if (!bc._seen) bc._seen = {};\n      bc._seen[(podcast || '') + '||' + title] = 'added';\n      fs.writeFileSync(cachePath, JSON.stringify(bc, null, 2));\n    } catch(e) {}\n  }\n  return [{json: {reply_text: `\ud83d\udccb A\u00f1adido a tu lista: *${title}*`, reply_markup: null, callback_query_id: cbId, answer_text: '\u2705 A\u00f1adido'}}];\n}\n\n// DONE\nif (action === 'q_done') {\n  const item = queue.items.find(i => i.id === itemId);\n  if (!item) return [{json: {reply_text: 'No encontrado', reply_markup: null, callback_query_id: cbId, answer_text: null}}];\n  item.status = 'listened';\n  item.listened_at = new Date().toISOString();\n  saveQueue();\n  const ratingMarkup = {inline_keyboard: [[\n    {text: '0\u2b50', callback_data: `q_rate:${itemId}:0`},\n    {text: '1\u2b50', callback_data: `q_rate:${itemId}:1`},\n    {text: '2\u2b50', callback_data: `q_rate:${itemId}:2`},\n    {text: '3\u2b50', callback_data: `q_rate:${itemId}:3`},\n    {text: '4\u2b50', callback_data: `q_rate:${itemId}:4`},\n    {text: '5\u2b50', callback_data: `q_rate:${itemId}:5`}\n  ]]};\n  return [{json: {reply_text: `\u2705 *${item.title}*\\n\\n\u00bfCu\u00e1nto te ha gustado? (0\u20135)`, reply_markup: JSON.stringify(ratingMarkup), callback_query_id: cbId, answer_text: '\u00a1Marcado!'}}];\n}\n\n// SKIP\nif (action === 'q_skip') {\n  const item = queue.items.find(i => i.id === itemId);\n  if (item) { item.status = 'skipped'; saveQueue(); }\n  return [{json: {reply_text: null, reply_markup: null, callback_query_id: cbId, answer_text: '\u23ed Saltado'}}];\n}\n\n// DELETE\nif (action === 'q_del') {\n  const item = queue.items.find(i => i.id === itemId);\n  const title = item ? item.title : '\u00edtem';\n  queue.items = queue.items.filter(i => i.id !== itemId);\n  saveQueue();\n  return [{json: {reply_text: null, reply_markup: null, callback_query_id: cbId, answer_text: '\ud83d\uddd1 Eliminado'}}];\n}\n\n// RATE\nif (action === 'q_rate') {\n  const rating = inp.queue_rating !== null ? inp.queue_rating : 0;\n  const item = queue.items.find(i => i.id === itemId);\n  if (item) {\n    item.rating = rating;\n    saveQueue();\n    // Feed into ratings_history for profile learning\n    try {\n      const rPath = '/data/ratings_history.json';\n      const r = JSON.parse(fs.readFileSync(rPath, 'utf8'));\n      r.ratings.push({item_id: item.id, item_type: 'podcast', action: 'queue_rate', rating, title: item.title, timestamp: new Date().toISOString()});\n      fs.writeFileSync(rPath, JSON.stringify(r, null, 2));\n    } catch(e) {}\n  }\n  const stars = '\u2b50'.repeat(rating);\n  const txt = rating > 0 ? `${stars} Valoraci\u00f3n guardada` : '0 estrellas guardado';\n  return [{json: {reply_text: txt, reply_markup: null, callback_query_id: cbId, answer_text: stars || '0\u2b50'}}];\n}\n\n// EB_SKIP (episode browse skip — acknowledge and mark as seen)\nif (action === 'eb_skip') {\n  try {\n    const cachePath = '/data/episode_browse_cache.json';\n    const bc = JSON.parse(fs.readFileSync(cachePath, 'utf8'));\n    const ep = bc[itemId];\n    if (ep) {\n      if (!bc._seen) bc._seen = {};\n      bc._seen[(ep.podcast || '') + '||' + ep.title] = 'skipped';\n      fs.writeFileSync(cachePath, JSON.stringify(bc, null, 2));\n    }\n  } catch(e) {}\n  return [{json: {reply_text: null, reply_markup: null, callback_query_id: cbId, answer_text: '\u274c Saltado'}}];\n}\n\n// SKIPPED LIST\nif (action === 'skipped') {\n  const skipped = queue.items.filter(i => i.status === 'skipped');\n  if (!skipped.length) return [{json: {reply_text: '\u23ed No tienes episodios saltados.', reply_markup: null, callback_query_id: cbId, answer_text: null}}];\n  const result = [];\n  skipped.slice(0, 10).forEach((item, i) => {\n    const header = i === 0 ? `\u23ed *Episodios saltados* (${skipped.length})\\n\\n` : '';\n    const text = `${header}*${i+1}.* *${item.title}*\\n_${item.podcast || 'Podcast'}_`;\n    const row = [{text: '\u21a9\ufe0f Recuperar', callback_data: `q_recover:${item.id}`}, {text: '\ud83d\uddd1 Borrar', callback_data: `q_del:${item.id}`}];\n    if (item.url) row.push({text: '\ud83d\udd17', url: item.url});\n    result.push({json: {reply_text: text, reply_markup: JSON.stringify({inline_keyboard: [row]}), callback_query_id: cbId, answer_text: null}});\n  });\n  if (skipped.length > 10) result.push({json: {reply_text: `_...y ${skipped.length - 10} m\u00e1s_`, reply_markup: null, callback_query_id: cbId, answer_text: null}});\n  return result;\n}\n\n// RECOVER (move skipped → pending)\nif (action === 'q_recover') {\n  const item = queue.items.find(i => i.id === itemId);\n  if (!item) return [{json: {reply_text: null, reply_markup: null, callback_query_id: cbId, answer_text: 'No encontrado'}}];\n  item.status = 'pending';\n  delete item.skipped_at;\n  saveQueue();\n  return [{json: {reply_text: null, reply_markup: null, callback_query_id: cbId, answer_text: `\u21a9\ufe0f Recuperado: ${item.title}`}}];\n}\n\nreturn [{json: {reply_text: 'Acci\u00f3n no reconocida', reply_markup: null, callback_query_id: null, answer_text: null}}];"
+      }
+    },
+    {
+      "id": "queue-0004-0004-0004-000000000004",
+      "name": "Queue Has Reply?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        600
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ !!$json.reply_text }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "queue-0005-0005-0005-000000000005",
+      "name": "Queue Send",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        2220,
+        540
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ \"https://api.telegram.org/bot\" + $env.TELEGRAM_BOT_TOKEN + \"/sendMessage\" }}",
+        "sendHeaders": false,
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {chat_id: $env.TELEGRAM_CHAT_ID, text: $json.reply_text, parse_mode: \"Markdown\", reply_markup: $json.reply_markup ? JSON.parse($json.reply_markup) : undefined} }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "queue-0006-0006-0006-000000000006",
+      "name": "Queue Answer CB",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        2220,
+        680
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ \"https://api.telegram.org/bot\" + $env.TELEGRAM_BOT_TOKEN + \"/answerCallbackQuery\" }}",
+        "sendHeaders": false,
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {callback_query_id: $json.callback_query_id, text: $json.answer_text || \"\"} }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "pods-0004-0004-0004-000000000004",
+      "name": "Needs Search?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2000, 800],
+      "parameters": {
+        "conditions": {
+          "options": {"caseSensitive": true, "leftValue": "", "typeValidation": "loose"},
+          "conditions": [{"leftValue": "={{ $json.needs_search }}", "rightValue": true, "operator": {"type": "boolean", "operation": "true"}}],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "pods-0005-0005-0005-000000000005",
+      "name": "Search & Follow",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [2220, 720],
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst crypto = require('crypto');\nconst inp = $input.first().json;\nconst query = inp.search_query || '';\nconst cbId = inp.callback_query_id || null;\nconst cachePath = '/data/podcast_search_cache.json';\n\nfunction httpGet(urlStr, reqHeaders = {}, redirects = 5) {\n  return new Promise((resolve, reject) => {\n    if (redirects < 0) return reject(new Error('too many redirects'));\n    const https = require('https'), http = require('http');\n    const lib = urlStr.startsWith('https') ? https : http;\n    lib.get(urlStr, {headers: {'User-Agent': 'PodcastBot/1.0', ...reqHeaders}}, (res) => {\n      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {\n        res.resume();\n        return resolve(httpGet(res.headers.location, reqHeaders, redirects - 1));\n      }\n      const chunks = [];\n      res.on('data', c => chunks.push(c));\n      res.on('end', () => {\n        const body = Buffer.concat(chunks).toString();\n        try { resolve(JSON.parse(body)); } catch(e) { resolve(body); }\n      });\n    }).on('error', reject).setTimeout(10000, function(){ this.destroy(new Error('timeout')); });\n  });\n}\n\n// ── MULTI-FOLLOW: auto-pick top result for each name ──────────────────────────\nif (inp.search_queries && inp.search_queries.length > 0) {\n  const profilePath = '/data/user_profile.json';\n  const profile = JSON.parse(fs.readFileSync(profilePath, 'utf8'));\n  const podcasts = profile.known_podcasts || [];\n  const added = [...(inp.pre_added || [])];\n  const already = [...(inp.already_following || [])];\n  const notFound = [];\n  for (const q of inp.search_queries) {\n    if (podcasts.find(p => p.name.toLowerCase() === q.toLowerCase())) { already.push(q); continue; }\n    let found = null;\n    try {\n      const d = await httpGet(`https://itunes.apple.com/search?term=${encodeURIComponent(q)}&media=podcast&limit=3`);\n      if (d.results && d.results[0] && d.results[0].feedUrl) found = {name: d.results[0].collectionName, rss_url: d.results[0].feedUrl, youtube_rss_url: null};\n    } catch(e) {}\n    if (!found) {\n      try {\n        const epoch = Math.floor(Date.now()/1000);\n        const apiKey = $env.PODCASTINDEX_API_KEY, apiSecret = $env.PODCASTINDEX_API_SECRET;\n        const hash = crypto.createHash('sha1').update(apiKey + apiSecret + epoch).digest('hex');\n        const d = await httpGet(`https://api.podcastindex.org/api/1.0/search/byterm?q=${encodeURIComponent(q)}&max=1`, {'X-Auth-Key': apiKey, 'X-Auth-Date': String(epoch), 'Authorization': hash});\n        if (d.feeds && d.feeds[0]) found = {name: d.feeds[0].title, rss_url: d.feeds[0].url, youtube_rss_url: null};\n      } catch(e) {}\n    }\n    if (found) {\n      if (podcasts.find(p => p.rss_url === found.rss_url || p.name === found.name)) { already.push(found.name); }\n      else {\n        podcasts.push({name: found.name, rss_url: found.rss_url||null, youtube_rss_url: found.youtube_rss_url||null, language: 'es', priority: 6, max_duration_minutes: 90, feedback: {topic_score:null,host_score:null,completion_rate:null,why_i_like:[],episodes_rated:0,quick_likes:0,quick_dislikes:0}});\n        added.push(found.name);\n      }\n    } else { notFound.push(q); }\n  }\n  profile.known_podcasts = podcasts;\n  profile.last_updated = new Date().toISOString();\n  fs.writeFileSync(profilePath, JSON.stringify(profile, null, 2));\n  let text = '';\n  if (added.length) text += `\u2705 *${added.length} a\u00f1adidos:*\\n${added.map(n => `\u2022 ${n}`).join('\\n')}\\n\\n`;\n  if (already.length) text += `\u2139\ufe0f Ya los segu\u00edas: ${already.join(', ')}\\n\\n`;\n  if (notFound.length) text += `\u274c No encontrados: ${notFound.join(', ')}\\n_Prueba con /follow individualmente._`;\n  return [{json: {reply_text: text.trim(), reply_markup: null, callback_query_id: cbId, answer_text: null}}];\n}\n// ─────────────────────────────────────────────────────────────────────────────\n\nconst candidates = [];\nconst seen = new Set();\nfunction add(name, rss_url, yt_rss, yt_ch) {\n  const k = rss_url || yt_rss || name;\n  if (seen.has(k)) return;\n  seen.add(k);\n  candidates.push({id: 'pfc' + candidates.length, name, rss_url: rss_url||null, youtube_rss_url: yt_rss||null, youtube_channel_url: yt_ch||null});\n}\n\n// 1. iTunes\ntry {\n  const d = await httpGet(`https://itunes.apple.com/search?term=${encodeURIComponent(query)}&media=podcast&limit=5`);\n  for (const r of (d.results || [])) if (r.feedUrl && r.collectionName) add(r.collectionName, r.feedUrl, null, null);\n} catch(e) {}\n\n// 2. Podcast Index\ntry {\n  const epoch = Math.floor(Date.now()/1000);\n  const apiKey = $env.PODCASTINDEX_API_KEY, apiSecret = $env.PODCASTINDEX_API_SECRET;\n  const hash = crypto.createHash('sha1').update(apiKey + apiSecret + epoch).digest('hex');\n  const d = await httpGet(`https://api.podcastindex.org/api/1.0/search/byterm?q=${encodeURIComponent(query)}&max=5`,\n    {'X-Auth-Key': apiKey, 'X-Auth-Date': String(epoch), 'Authorization': hash});\n  for (const f of (d.feeds || [])) if (f.url && f.title) add(f.title, f.url, null, null);\n} catch(e) {}\n\n// 3. YouTube\ntry {\n  const d = await httpGet(`https://www.googleapis.com/youtube/v3/search?part=snippet&type=channel&q=${encodeURIComponent(query)}&maxResults=3&key=${$env.YOUTUBE_API_KEY}`);\n  for (const ch of (d.items || [])) {\n    const cid = ch.id.channelId;\n    add(ch.snippet.channelTitle, null, `https://www.youtube.com/feeds/videos.xml?channel_id=${cid}`, `https://www.youtube.com/channel/${cid}`);\n  }\n} catch(e) {}\n\nif (!candidates.length) {\n  return [{json: {reply_text: `\ud83d\udd0d No encontr\u00e9 *${query}* en iTunes, PodcastIndex ni YouTube.\\n\\nPrueba con variaciones del nombre o p\u00e1same la URL del RSS directamente:\\n\\`/follow https://url-del-rss.com/feed\\``, reply_markup: null, callback_query_id: cbId, answer_text: 'No encontrado'}}];\n}\n\nconst cache = {};\nfor (const c of candidates) cache[c.id] = c;\nfs.writeFileSync(cachePath, JSON.stringify(cache, null, 2));\n\nconst rows = candidates.slice(0, 5).map(c => [{\n  text: (c.rss_url ? '\ud83d\udce1 ' : '\ud83d\udcfa ') + c.name.slice(0, 35),\n  callback_data: `pf_choose:${c.id}`\n}]);\nrows.push([{text: '\u274c Ninguno de estos', callback_data: 'pf_none:x'}]);\n\nreturn [{json: {\n  reply_text: `\ud83d\udd0d *Resultados para \"${query}\"*\\n\\nElige el correcto:`,\n  reply_markup: JSON.stringify({inline_keyboard: rows}),\n  callback_query_id: cbId, answer_text: null\n}}];"
+      }
+    },
+    {
+      "id": "eps-0001-0001-0001-000000000001",
+      "name": "Is Episodes?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1340, 860],
+      "parameters": {
+        "conditions": {
+          "options": {"caseSensitive": true, "leftValue": "", "typeValidation": "loose"},
+          "conditions": [{"leftValue": "={{ $json.route }}", "rightValue": "episodes", "operator": {"type": "string", "operation": "equals"}}],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "eps-0002-0002-0002-000000000002",
+      "name": "Fetch & Handle Episodes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [1560, 860],
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst inp = $input.first().json;\nconst {episodes_action, episode_count, podcast_filter, raw_text} = inp;\nconst cbId = inp.callback_query_id || null;\nconst profilePath = '/data/user_profile.json';\nconst queuePath = '/data/podcast_queue.json';\nconst cachePath = '/data/episode_browse_cache.json';\n\nconst profile = JSON.parse(fs.readFileSync(profilePath, 'utf8'));\nlet queue = {items: []};\ntry { queue = JSON.parse(fs.readFileSync(queuePath, 'utf8')); } catch(e) {}\nlet browseCache = {};\ntry { browseCache = JSON.parse(fs.readFileSync(cachePath, 'utf8')); } catch(e) {}\n\n// Select podcasts\nlet podcasts = (profile.known_podcasts || []).filter(p => p.rss_url || p.youtube_rss_url);\nif (podcast_filter && podcast_filter.trim()) {\n  const q = podcast_filter.toLowerCase();\n  podcasts = podcasts.filter(p => p.name.toLowerCase().includes(q));\n}\nif (!podcasts.length) {\n  const msg = podcast_filter && podcast_filter.trim()\n    ? `No encontr\u00e9 ning\u00fan podcast que coincida con \"${podcast_filter}\". Usa /podcasts para ver tu lista.`\n    : 'No tienes podcasts con RSS o YouTube configurados. A\u00f1ade uno con /follow.';\n  return [{json: {reply_text: msg, reply_markup: null, callback_query_id: cbId, answer_text: null}}];\n}\n\n// Build skip_clips map by podcast name\nconst skipClipsMap = {};\nfor (const p of podcasts) { if (p.skip_clips) skipClipsMap[p.name] = true; }\n\nconst CLIP_RE = /\\b(short|shorts|clip|clips|recorte|recortes|highlight|highlights|teaser|trailer|avance|snippet)\\b|#shorts/i;\nfunction isClip(podcastName, title, duration) {\n  if (!skipClipsMap[podcastName]) return false;\n  if (duration) {\n    const parts = String(duration).split(':').map(Number);\n    const secs = parts.length === 3 ? parts[0]*3600+parts[1]*60+parts[2] : parts.length === 2 ? parts[0]*60+parts[1] : parseInt(duration,10);\n    if (secs > 0 && secs < 600) return true;\n  }\n  return CLIP_RE.test(title);\n}\n\nfunction parseDate(s) {\n  if (/^\\d{4}-\\d{2}-\\d{2}$/.test(s)) return new Date(s + 'T00:00:00');\n  const parts = s.split('/');\n  const d = parts[0].padStart(2,'0'), m = parts[1].padStart(2,'0'), y = parts[2] || new Date().getFullYear();\n  return new Date(`${y}-${m}-${d}T00:00:00`);\n}\n\n// Parse date range for browse_range\nlet dateFrom = null, dateTo = null;\nif (episodes_action === 'browse_range') {\n  const dateRe = /(\\d{4}-\\d{2}-\\d{2}|\\d{1,2}\\/\\d{1,2}(?:\\/\\d{4})?)/g;\n  const rawStr = raw_text || '';\n  const matches = [...rawStr.matchAll(dateRe)];\n  if (matches[0]) dateFrom = parseDate(matches[0][1]);\n  if (matches[1]) dateTo = parseDate(matches[1][1]);\n  if (!dateTo || dateTo > new Date()) dateTo = new Date();\n  if (!dateFrom) {\n    return [{json: {reply_text: 'Formato de fecha no reconocido.\\n\\nUsa:\\n`/desde 2026-04-01`\\n`/desde 2026-04-01 hasta 2026-04-10`\\n`/desde 01/04/2026 hasta 10/04/2026 Nombre Podcast`', reply_markup: null, callback_query_id: cbId, answer_text: null}}];\n  }\n}\n\n// HTTP helper (fetch not available in n8n vm2 sandbox)\nfunction httpGet(urlStr, redirects) {\n  if (redirects === undefined) redirects = 5;\n  return new Promise((resolve, reject) => {\n    if (redirects < 0) return reject(new Error('too many redirects'));\n    const https = require('https'), http = require('http');\n    const lib = urlStr.startsWith('https') ? https : http;\n    const req = lib.get(urlStr, {headers: {'User-Agent': 'PodcastBot/1.0'}}, (res) => {\n      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {\n        res.resume();\n        return resolve(httpGet(res.headers.location, redirects - 1));\n      }\n      const chunks = [];\n      res.on('data', c => chunks.push(c));\n      res.on('end', () => resolve(Buffer.concat(chunks).toString()));\n    });\n    req.on('error', reject);\n    req.setTimeout(10000, () => { req.destroy(new Error('timeout')); });\n  });\n}\n\n// Fetch episodes from each podcast RSS/Atom feed\nconst allEpisodes = [];\nfor (const podcast of podcasts) {\n  const feedUrl = podcast.rss_url || podcast.youtube_rss_url;\n  try {\n    const xml = await httpGet(feedUrl);\n    // RSS: <item> tags\n    const itemRe = /<item>([\\s\\S]*?)<\\/item>/g;\n    let m;\n    while ((m = itemRe.exec(xml)) !== null) {\n      const block = m[1];\n      const get = (tag) => { const r = block.match(new RegExp('<' + tag + '[^>]*>(?:<!\\\\[CDATA\\\\[)?([\\\\s\\\\S]*?)(?:\\\\]\\\\]>)?<\\\\/' + tag + '>')); return r ? r[1].trim() : ''; };\n      const encMatch = block.match(/enclosure[^>]+url=\"([^\"]+)\"/);\n      const pubRaw = get('pubDate') || get('published') || get('dc:date');\n      const d = pubRaw ? new Date(pubRaw) : null;\n      const epTitle = get('title') || 'Sin t\u00edtulo';\n      const epDur = get('itunes:duration') || null;\n      if (!isClip(podcast.name, epTitle, epDur)) allEpisodes.push({\n        podcast_name: podcast.name,\n        title: epTitle,\n        url: get('link') || (encMatch ? encMatch[1] : ''),\n        pub_date: d ? d.toISOString() : null,\n        pub_date_obj: d,\n        description: get('description').replace(/<[^>]+>/g, '').slice(0, 150),\n        duration: epDur\n      });\n    }\n    // Atom: <entry> tags (YouTube feeds)\n    const entryRe = /<entry>([\\s\\S]*?)<\\/entry>/g;\n    while ((m = entryRe.exec(xml)) !== null) {\n      const block = m[1];\n      const getA = (tag) => { const r = block.match(new RegExp('<' + tag + '[^>]*>([\\\\s\\\\S]*?)<\\\\/' + tag + '>')); return r ? r[1].trim() : ''; };\n      const linkM = block.match(/<link[^>]+href=\"([^\"]+)\"/);\n      const pubRaw = getA('published') || getA('updated');\n      const d = pubRaw ? new Date(pubRaw) : null;\n      const atTitle = getA('title').replace(/<[^>]+>/g,'') || 'Sin t\u00edtulo';\n      if (!isClip(podcast.name, atTitle, null)) allEpisodes.push({\n        podcast_name: podcast.name,\n        title: atTitle,\n        url: linkM ? linkM[1] : '',\n        pub_date: d ? d.toISOString() : null,\n        pub_date_obj: d,\n        description: getA('summary').replace(/<[^>]+>/g, '').slice(0, 150),\n        duration: null\n      });\n    }\n  } catch(e) { /* skip failed feeds */ }\n}\n\n// Sort newest first\nallEpisodes.sort((a, b) => (b.pub_date_obj || 0) - (a.pub_date_obj || 0));\n\n// Apply filters\nlet filtered = allEpisodes;\nif (episodes_action === 'browse_range') {\n  filtered = allEpisodes.filter(ep => ep.pub_date_obj && ep.pub_date_obj >= dateFrom && ep.pub_date_obj <= dateTo);\n}\n// For browse/bulk_add: don't slice yet — slice AFTER seen filter so N means N new episodes\n\nif (!filtered.length) {\n  const msg = episodes_action === 'browse_range'\n    ? 'No encontr\u00e9 episodios en ese rango de fechas.'\n    : 'No encontr\u00e9 episodios en los feeds. \u00bfTienes RSS configurado? Revisa con /podcasts.';\n  return [{json: {reply_text: msg, reply_markup: null, callback_query_id: cbId, answer_text: null}}];\n}\n\n// BULK ADD\nif (episodes_action === 'bulk_add') {\n  // Apply count limit after seen filter\n  const limit = episode_count || 5;\n  filtered = filtered.filter(ep => !queuedTitles.has(ep.title)).slice(0, limit);\n  const added = [];\n  for (const ep of filtered) {\n    const dup = queue.items.find(i => i.title === ep.title && i.status === 'pending');\n    if (!dup) {\n      queue.items.push({\n        id: 'q' + Date.now().toString(36).slice(-8) + Math.random().toString(36).slice(-3),\n        title: ep.title, podcast: ep.podcast_name, url: ep.url,\n        duration_min: null, source: 'bulk_add',\n        added_at: new Date().toISOString(), status: 'pending', rating: null\n      });\n      added.push(ep);\n    }\n  }\n  fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2));\n  if (!added.length) return [{json: {reply_text: 'Todos los episodios ya estaban en tu lista.', reply_markup: null, callback_query_id: cbId, answer_text: null}}];\n  let text = `\u2705 *${added.length} episodio${added.length > 1 ? 's' : ''} a\u00f1adidos a tu lista*\\n\\n`;\n  added.forEach((ep, i) => { text += `${i+1}. *${ep.podcast_name}* \u2014 ${ep.title}\\n`; });\n  return [{json: {reply_text: text, reply_markup: null, callback_query_id: cbId, answer_text: null}}];\n}\n\n// BROWSE / BROWSE_RANGE: one message per episode with ✅/❌ buttons\n// Build sets of already-seen and queued episodes to avoid repeats\nconst seenKeys = new Set();\ntry {\n  const bc = JSON.parse(fs.readFileSync(cachePath, 'utf8'));\n  for (const [k] of Object.entries(bc._seen || {})) seenKeys.add(k);\n} catch(e) {}\nconst queuedTitles = new Set((queue.items || []).filter(i => i.status === 'pending').map(i => i.title));\n\n// Apply count limit AFTER seen filter so N means N unseen episodes\nconst browseLimit = episode_count || 5;\nlet browseCount = 0;\n\nconst result = [];\nlet counter = 0;\nfor (const ep of filtered) {\n  if (browseCount >= browseLimit) break;\n  const seenKey = (ep.podcast_name || '') + '||' + ep.title;\n  if (seenKeys.has(seenKey) || queuedTitles.has(ep.title)) continue;\n  browseCount++;\n  const episode_id = 'eb' + Date.now().toString(36).slice(-6) + (counter++).toString(36);\n  browseCache[episode_id] = {title: ep.title, podcast: ep.podcast_name, url: ep.url, duration_min: null, pub_date: ep.pub_date};\n  const dateStr = ep.pub_date_obj ? ep.pub_date_obj.toLocaleDateString('es-ES', {day:'numeric', month:'short'}) : '';\n  const dur = ep.duration ? ` \u00b7 ${ep.duration}` : '';\n  let text = `\ud83c\udf99\ufe0f *${ep.podcast_name}*\\n_${ep.title}${dur}_`;\n  if (dateStr) text += ` \u00b7 ${dateStr}`;\n  if (ep.description) text += `\\n${ep.description}`;\n  if (ep.url) text += `\\n\ud83d\udd17 ${ep.url}`;\n  result.push({json: {\n    reply_text: text,\n    reply_markup: JSON.stringify({inline_keyboard: [[\n      {text: '\u2705 A\u00f1adir', callback_data: `q_add:${episode_id}`},\n      {text: '\u274c Saltar', callback_data: `eb_skip:${episode_id}`}\n    ]]}),\n    callback_query_id: null,\n    answer_text: null\n  }});\n}\nfs.writeFileSync(cachePath, JSON.stringify(browseCache, null, 2));\nreturn result;"
+      }
+    },
+    {
+      "id": "pods-0001-0001-0001-000000000001",
+      "name": "Is Podcasts?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1340, 620],
+      "parameters": {
+        "conditions": {
+          "options": {"caseSensitive": true, "leftValue": "", "typeValidation": "loose"},
+          "conditions": [{"leftValue": "={{ $json.route }}", "rightValue": "podcasts", "operator": {"type": "string", "operation": "equals"}}],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "pods-0002-0002-0002-000000000002",
+      "name": "Is Podcasts Callback?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1560, 100],
+      "parameters": {
+        "conditions": {
+          "options": {"caseSensitive": true, "leftValue": "", "typeValidation": "loose"},
+          "conditions": [{"leftValue": "={{ $json.is_podcasts }}", "rightValue": true, "operator": {"type": "boolean", "operation": "true"}}],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "pods-0003-0003-0003-000000000003",
+      "name": "Handle Podcasts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [1780, 620],
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst inp = $input.first().json;\nconst profilePath = '/data/user_profile.json';\nconst profile = JSON.parse(fs.readFileSync(profilePath, 'utf8'));\nconst cbId = inp.callback_query_id || null;\nconst action = inp.podcasts_action || inp.action || 'list';\nconst query = inp.query || inp.item_id || '';\nconst R = (text, markup, ans) => [{json: {reply_text: text, reply_markup: markup || null, callback_query_id: cbId, answer_text: ans || null, needs_search: false}}];\n\nfunction formatPodcastList() {\n  const podcasts = profile.known_podcasts || [];\n  if (!podcasts.length) return {text: '\ud83c\udfa4 *No sigues ning\u00fan podcast*\\n\\nUsa `/follow Nombre` para buscar uno.', markup: null};\n  let text = `\ud83c\udfa4 *Podcasts que sigues* (${podcasts.length})\\n\\n`;\n  const rows = [];\n  podcasts.forEach((p, i) => {\n    const icons = (p.rss_url ? '\ud83d\udce1' : '') + (p.youtube_rss_url ? '\ud83d\udcfa' : '');\n    const clipIcon = p.skip_clips ? '\ud83c\udfa7' : '\u2702\ufe0f';\n    text += `${i+1}. *${p.name}* ${icons}${p.skip_clips ? ' \ud83c\udfa7' : ''}\\n`;\n    rows.push([\n      {text: `\ud83d\uddd1 ${i+1}. ${p.name.slice(0,18)}`, callback_data: `p_del:${i}`},\n      {text: `${clipIcon} recortes`, callback_data: `p_tc:${i}`}\n    ]);\n  });\n  text += '\\n_\ud83d\udce1 RSS  \ud83d\udcfa YouTube  \ud83c\udfa7 filtro recortes activo_\\n_Para renombrar: /rename N Nuevo Nombre_';\n  return {text, markup: {inline_keyboard: rows}};\n}\n\nif (action === 'list') {\n  const {text, markup} = formatPodcastList();\n  return R(text, markup ? JSON.stringify(markup) : null);\n}\n\nif (action === 'follow') {\n  const isUrl = /^https?:\\/\\//.test(query);\n  const podcasts = profile.known_podcasts || [];\n  if (isUrl) {\n    const exists = podcasts.find(p => p.rss_url === query || p.youtube_rss_url === query);\n    if (exists) return R(`\ud83c\udfa4 *${exists.name}* ya lo sigues`, null, 'Ya seguido');\n    const isYtFeed = query.includes('youtube.com/feeds');\n    const rawName = query.split('/').filter(Boolean).pop() || query;\n    const newPodcast = {\n      name: rawName,\n      rss_url: isYtFeed ? null : query,\n      youtube_rss_url: isYtFeed ? query : null,\n      language: 'es', priority: 6, max_duration_minutes: 90,\n      feedback: {topic_score: null, host_score: null, completion_rate: null, why_i_like: [], episodes_rated: 0, quick_likes: 0, quick_dislikes: 0}\n    };\n    podcasts.push(newPodcast);\n    profile.known_podcasts = podcasts;\n    profile.last_updated = new Date().toISOString();\n    fs.writeFileSync(profilePath, JSON.stringify(profile, null, 2));\n    const idx = podcasts.length;\n    return R(`\u2705 A\u00f1adido como *${rawName}*\\n\ud83d\udcdd Para renombrar: \\`/rename ${idx} Nombre Correcto\\``, null, '\u2705 A\u00f1adido');\n  }\n  const exists = podcasts.find(p => p.name.toLowerCase() === query.toLowerCase());\n  if (exists) return R(`\ud83c\udfa4 *${exists.name}* ya lo sigues`, null, 'Ya seguido');\n  return [{json: {needs_search: true, search_query: query, callback_query_id: cbId}}];\n}\n\nif (action === 'follow_multi') {\n  const podcasts = profile.known_podcasts || [];\n  const allQueries = inp.queries || [];\n  const urls = allQueries.filter(q => /^https?:\\/\\//.test(q));\n  const names = allQueries.filter(q => !/^https?:\\/\\//.test(q));\n  const added = [], already = [];\n  for (const url of urls) {\n    const exists = podcasts.find(p => p.rss_url === url || p.youtube_rss_url === url);\n    if (exists) { already.push(exists.name); continue; }\n    const isYt = url.includes('youtube.com/feeds');\n    const rawName = decodeURIComponent(url.split('/').filter(Boolean).pop() || url);\n    podcasts.push({name: rawName, rss_url: isYt ? null : url, youtube_rss_url: isYt ? url : null, language: 'es', priority: 6, max_duration_minutes: 90, feedback: {topic_score:null,host_score:null,completion_rate:null,why_i_like:[],episodes_rated:0,quick_likes:0,quick_dislikes:0}});\n    added.push(rawName);\n  }\n  if (added.length || already.length) {\n    profile.known_podcasts = podcasts;\n    profile.last_updated = new Date().toISOString();\n    fs.writeFileSync(profilePath, JSON.stringify(profile, null, 2));\n  }\n  if (!names.length) {\n    let msg = '';\n    if (added.length) msg += `\u2705 A\u00f1adidos: ${added.map(n => `*${n}*`).join(', ')}\\n`;\n    if (already.length) msg += `\u2139\ufe0f Ya los segu\u00edas: ${already.map(n => `*${n}*`).join(', ')}`;\n    return R(msg.trim() || 'Nada nuevo a\u00f1adido');\n  }\n  return [{json: {needs_search: true, search_queries: names, pre_added: added, already_following: already, callback_query_id: cbId}}];\n}\n\nif (action === 'unfollow') {\n  const podcasts = profile.known_podcasts || [];\n  const idx = podcasts.findIndex(p => p.name.toLowerCase().includes(query.toLowerCase()));\n  if (idx === -1) return R(`No encontr\u00e9 ning\u00fan podcast que coincida con *${query}*`);\n  const removed = podcasts[idx];\n  profile.known_podcasts.splice(idx, 1);\n  profile.last_updated = new Date().toISOString();\n  fs.writeFileSync(profilePath, JSON.stringify(profile, null, 2));\n  return R(`\ud83d\uddd1 Dejado de seguir: *${removed.name}*`, null, '\ud83d\uddd1 Eliminado');\n}\n\nif (action === 'p_del') {\n  const idx = parseInt(query, 10);\n  const podcasts = profile.known_podcasts || [];\n  if (isNaN(idx) || idx < 0 || idx >= podcasts.length) return R(null, null, 'No encontrado');\n  const removed = podcasts[idx];\n  profile.known_podcasts.splice(idx, 1);\n  profile.last_updated = new Date().toISOString();\n  fs.writeFileSync(profilePath, JSON.stringify(profile, null, 2));\n  return R(null, null, `\ud83d\uddd1 ${removed.name} eliminado`);\n}\n\nif (action === 'pf_choose') {\n  try {\n    const searchCache = JSON.parse(fs.readFileSync('/data/podcast_search_cache.json', 'utf8'));\n    const c = searchCache[query];\n    if (c) {\n      const podcasts = profile.known_podcasts || [];\n      if (podcasts.find(p => p.name === c.name || (c.rss_url && p.rss_url === c.rss_url))) return R(`\ud83c\udfa4 *${c.name}* ya lo sigues`, null, 'Ya seguido');\n      podcasts.push({name: c.name, rss_url: c.rss_url || null, youtube_rss_url: c.youtube_rss_url || null, youtube_channel_url: c.youtube_channel_url || null, language: 'es', priority: 6, max_duration_minutes: 90, feedback: {topic_score:null,host_score:null,completion_rate:null,why_i_like:[],episodes_rated:0,quick_likes:0,quick_dislikes:0}});\n      profile.known_podcasts = podcasts;\n      profile.last_updated = new Date().toISOString();\n      fs.writeFileSync(profilePath, JSON.stringify(profile, null, 2));\n      const icons = [c.rss_url ? '\ud83d\udce1 RSS' : '', c.youtube_rss_url ? '\ud83d\udcfa YouTube' : ''].filter(Boolean).join(' ');\n      return R(`\u2705 *${c.name}* a\u00f1adido${icons ? ' \u2014 ' + icons : ''}`, null, '\u2705 A\u00f1adido');\n    }\n  } catch(e) {}\n  return R('No encontr\u00e9 el resultado. Intenta de nuevo con /follow.');\n}\n\nif (action === 'p_tc') {\n  const idx = parseInt(query, 10);\n  const podcasts = profile.known_podcasts || [];\n  if (isNaN(idx) || idx < 0 || idx >= podcasts.length) return R(null, null, 'Error');\n  podcasts[idx].skip_clips = !podcasts[idx].skip_clips;\n  profile.last_updated = new Date().toISOString();\n  fs.writeFileSync(profilePath, JSON.stringify(profile, null, 2));\n  const state = podcasts[idx].skip_clips ? '\ud83c\udfa7 Filtrando recortes' : '\u2702\ufe0f Mostrando todo';\n  return R(null, null, `${state}: ${podcasts[idx].name}`);\n}\n\nif (action === 'pf_none') return R(null, null, '\u274c Cancelado');\n\nif (action === 'rename') {\n  const idx = typeof inp.podcast_idx === 'number' ? inp.podcast_idx : parseInt(String(inp.podcast_idx), 10);\n  const new_name = inp.new_name || '';\n  const podcasts = profile.known_podcasts || [];\n  if (isNaN(idx) || idx < 0 || idx >= podcasts.length) return R('N\u00famero inv\u00e1lido. Usa /podcasts para ver la lista.\\nEjemplo: `/rename 2 Darknet Diaries`');\n  const old_name = podcasts[idx].name;\n  podcasts[idx].name = new_name;\n  profile.last_updated = new Date().toISOString();\n  fs.writeFileSync(profilePath, JSON.stringify(profile, null, 2));\n  return R(`\u2705 _${old_name}_ \u2192 *${new_name}*`);\n}\n\nif (action === 'rename_help') return R('Uso: `/rename <n\u00famero> <nuevo nombre>`\\nEjemplo: `/rename 2 Darknet Diaries`\\n\\nUsa /podcasts para ver los n\u00fameros.');\n\nif (action === 'help') {\n  return R([\n    '\ud83e\udd16 *Comandos disponibles*', '',\n    '\ud83d\udccb *Lista de escucha*',\n    '`/lista` \u2014 ver episodios pendientes',\n    '`/saltados` \u2014 ver episodios saltados y recuperarlos',\n    '`/add T\u00edtulo` \u2014 a\u00f1adir episodio manual', '',\n    '\ud83c\udfa4 *Podcasts*',\n    '`/podcasts` \u2014 ver y gestionar',\n    '`/follow Nombre` \u2014 buscar y seguir',\n    '`/follow URL` \u2014 a\u00f1adir por RSS/YouTube',\n    '`/unfollow Nombre` \u2014 dejar de seguir',\n    '`/rename N Nombre` \u2014 renombrar (N de /podcasts)', '',\n    '\ud83d\udd0d *Explorar episodios*',\n    '`/ultimos N [podcast]` \u2014 a\u00f1adir N m\u00e1s recientes',\n    '`/elegir N [podcast]` \u2014 elegir de los N m\u00e1s recientes',\n    '`/desde YYYY-MM-DD [hasta YYYY-MM-DD] [podcast]`',\n    '`/recomienda [N]` \u2014 recomendaciones personalizadas (defecto: 3)', '',\n    '\ud83d\udcac *Conversaci\u00f3n libre*',\n    'Cualquier mensaje va a Claude con tu perfil como contexto.'\n  ].join('\\n'));\n}\n\nreturn R('Acci\u00f3n no reconocida');"
+      }
+    }
+    ,{
+      "id": "rec-0001-0001-0001-000000000001",
+      "name": "Is Recommend?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1340, 1060],
+      "parameters": {
+        "conditions": {
+          "options": {"caseSensitive": true, "leftValue": "", "typeValidation": "loose"},
+          "conditions": [{"leftValue": "={{ $json.route }}", "rightValue": "recommend", "operator": {"type": "string", "operation": "equals"}}],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "rec-0002-0002-0002-000000000002",
+      "name": "Fetch & Recommend",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [1560, 1060],
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst inp = $input.first().json;\nconst count = inp.recommend_count || 3;\nconst cbId = inp.callback_query_id || null;\nconst cachePath = '/data/episode_browse_cache.json';\nconst queuePath = '/data/podcast_queue.json';\nconst profilePath = '/data/user_profile.json';\n\nfunction httpGet(urlStr, reqHeaders, redirects) {\n  if (!reqHeaders) reqHeaders = {};\n  if (redirects === undefined) redirects = 5;\n  return new Promise((resolve, reject) => {\n    if (redirects < 0) return reject(new Error('too many redirects'));\n    const https = require('https'), http = require('http');\n    const lib = urlStr.startsWith('https') ? https : http;\n    const req = lib.get(urlStr, {headers: {'User-Agent': 'PodcastBot/1.0', ...reqHeaders}}, (res) => {\n      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {\n        res.resume();\n        return resolve(httpGet(res.headers.location, reqHeaders, redirects - 1));\n      }\n      const chunks = [];\n      res.on('data', c => chunks.push(c));\n      res.on('end', () => { const b = Buffer.concat(chunks).toString(); try { resolve(JSON.parse(b)); } catch(e) { resolve(b); } });\n    });\n    req.on('error', reject);\n    req.setTimeout(12000, () => { req.destroy(new Error('timeout')); });\n  });\n}\n\nfunction httpPost(urlStr, headers, body) {\n  return new Promise((resolve, reject) => {\n    const https = require('https');\n    const data = JSON.stringify(body);\n    const url = new URL(urlStr);\n    const req = https.request({hostname: url.hostname, path: url.pathname, method: 'POST', headers: {'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data), ...headers}}, (res) => {\n      const chunks = [];\n      res.on('data', c => chunks.push(c));\n      res.on('end', () => { const b = Buffer.concat(chunks).toString(); try { resolve(JSON.parse(b)); } catch(e) { resolve(b); } });\n    });\n    req.on('error', reject);\n    req.setTimeout(30000, () => { req.destroy(new Error('timeout')); });\n    req.write(data); req.end();\n  });\n}\n\nconst profile = JSON.parse(fs.readFileSync(profilePath, 'utf8'));\nlet queue = {items: []};\ntry { queue = JSON.parse(fs.readFileSync(queuePath, 'utf8')); } catch(e) {}\nlet browseCache = {};\ntry { browseCache = JSON.parse(fs.readFileSync(cachePath, 'utf8')); } catch(e) {}\n\nconst seenKeys = new Set();\nfor (const [k] of Object.entries(browseCache._seen || {})) seenKeys.add(k);\nconst queuedTitles = new Set((queue.items || []).filter(i => i.status === 'pending').map(i => i.title));\nconst skippedItems = (queue.items || []).filter(i => i.status === 'skipped').slice(-20);\n\nconst skipClipsMap = {};\nfor (const p of (profile.known_podcasts || [])) { if (p.skip_clips) skipClipsMap[p.name] = true; }\nconst CLIP_RE = /\\b(short|shorts|clip|clips|recorte|recortes|highlight|highlights|teaser|trailer|avance|snippet)\\b|#shorts/i;\nfunction isClip(name, title, dur) {\n  if (!skipClipsMap[name]) return false;\n  if (dur) { const p = String(dur).split(':').map(Number); const s = p.length===3?p[0]*3600+p[1]*60+p[2]:p.length===2?p[0]*60+p[1]:parseInt(dur,10); if (s>0&&s<600) return true; }\n  return CLIP_RE.test(title);\n}\n\nconst cutoff = new Date();\ncutoff.setDate(cutoff.getDate() - 30);\nconst allEpisodes = [];\nconst podcasts = (profile.known_podcasts || []).filter(p => p.rss_url || p.youtube_rss_url);\n\nfor (const podcast of podcasts) {\n  const feedUrl = podcast.rss_url || podcast.youtube_rss_url;\n  try {\n    const xml = await httpGet(feedUrl);\n    const itemRe = /<item>([\\s\\S]*?)<\\/item>/g;\n    let m;\n    while ((m = itemRe.exec(xml)) !== null) {\n      const block = m[1];\n      const get = (tag) => { const r = block.match(new RegExp('<'+tag+'[^>]*>(?:<!\\\\[CDATA\\\\[)?([\\\\s\\\\S]*?)(?:\\\\]\\\\]>)?<\\/'+tag+'>')); return r ? r[1].trim() : ''; };\n      const encM = block.match(/enclosure[^>]+url=\"([^\"]+)\"/);\n      const pubRaw = get('pubDate') || get('published');\n      const d = pubRaw ? new Date(pubRaw) : null;\n      if (!d || d < cutoff) continue;\n      const title = get('title') || 'Sin título';\n      const dur = get('itunes:duration') || null;\n      if (isClip(podcast.name, title, dur)) continue;\n      const sk = podcast.name + '||' + title;\n      if (seenKeys.has(sk) || queuedTitles.has(title)) continue;\n      allEpisodes.push({podcast_name: podcast.name, title, url: get('link')||(encM?encM[1]:''), pub_date: d.toISOString(), description: get('description').replace(/<[^>]+>/g,'').slice(0,200), duration: dur});\n    }\n    const entryRe = /<entry>([\\s\\S]*?)<\\/entry>/g;\n    while ((m = entryRe.exec(xml)) !== null) {\n      const block = m[1];\n      const getA = (tag) => { const r = block.match(new RegExp('<'+tag+'[^>]*>([\\\\s\\\\S]*?)<\\/'+tag+'>')); return r ? r[1].trim() : ''; };\n      const linkM = block.match(/<link[^>]+href=\"([^\"]+)\"/);\n      const pubRaw = getA('published') || getA('updated');\n      const d = pubRaw ? new Date(pubRaw) : null;\n      if (!d || d < cutoff) continue;\n      const title = getA('title').replace(/<[^>]+>/g,'') || 'Sin título';\n      if (isClip(podcast.name, title, null)) continue;\n      const sk = podcast.name + '||' + title;\n      if (seenKeys.has(sk) || queuedTitles.has(title)) continue;\n      allEpisodes.push({podcast_name: podcast.name, title, url: linkM?linkM[1]:'', pub_date: d.toISOString(), description: getA('summary').replace(/<[^>]+>/g,'').slice(0,200), duration: null});\n    }\n  } catch(e) {}\n}\n\nif (!allEpisodes.length) {\n  return [{json: {reply_text: '😕 No encontré episodios nuevos para recomendar. Prueba en unos días o añade más podcasts con /follow.', reply_markup: null, callback_query_id: cbId, answer_text: null}}];\n}\n\nallEpisodes.sort((a, b) => new Date(b.pub_date) - new Date(a.pub_date));\nconst candidates = allEpisodes.slice(0, 40);\n\nlet ratingsStr = 'Sin valoraciones aún.';\ntry {\n  const rh = JSON.parse(fs.readFileSync('/data/ratings_history.json', 'utf8'));\n  const recent = (rh.ratings || []).slice(-10);\n  if (recent.length) ratingsStr = recent.map(r => `- \"${r.title}\" → ${r.rating}★`).join('\\n');\n} catch(e) {}\n\nconst skippedStr = skippedItems.length\n  ? skippedItems.map(i => `- \"${i.title}\" (${i.podcast || ''})`).join('\\n')\n  : 'Ninguno.';\n\nconst episodeList = candidates.map((ep, i) => {\n  const d = new Date(ep.pub_date).toLocaleDateString('es-ES', {day:'numeric', month:'short'});\n  return `${i+1}. [${ep.podcast_name}] \"${ep.title}\" (${d})${ep.description ? '\\n   '+ep.description.slice(0,120) : ''}`;\n}).join('\\n\\n');\n\nconst prompt = `Eres un recomendador de podcasts. Selecciona exactamente ${count} episodios de la lista que más le gustarán al usuario según su historial.\\n\\nVALORACIONES RECIENTES (positivo = le gustó, negativo = no):\\n${ratingsStr}\\n\\nEPISODIOS SALTADOS RECIENTEMENTE (no recomendar estos ni similares):\\n${skippedStr}\\n\\nEPISODIOS DISPONIBLES:\\n${episodeList}\\n\\nResponde SOLO con JSON válido, sin texto extra:\\n[{\"idx\": 1, \"reason\": \"frase corta máx 80 chars\"}, ...]\\n\\nElige ${count} episodios distintos. Evita recomendar episodios similares a los saltados.`;\n\nlet picks = [];\ntry {\n  const resp = await httpPost('https://api.anthropic.com/v1/messages', {'x-api-key': $env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01'}, {model: 'claude-sonnet-4-5', max_tokens: 600, messages: [{role: 'user', content: prompt}]});\n  const text = resp.content?.[0]?.text || '';\n  const jm = text.match(/\\[[\\s\\S]*\\]/);\n  if (jm) picks = JSON.parse(jm[0]);\n} catch(e) {\n  return [{json: {reply_text: '❌ Error al generar recomendaciones. Inténtalo de nuevo.', reply_markup: null, callback_query_id: cbId, answer_text: null}}];\n}\n\nif (!picks.length) return [{json: {reply_text: '😕 No pude generar recomendaciones ahora. Inténtalo de nuevo.', reply_markup: null, callback_query_id: cbId, answer_text: null}}];\n\nconst result = [];\nlet counter = 0;\nfor (const pick of picks.slice(0, count)) {\n  const ep = candidates[(pick.idx || 1) - 1];\n  if (!ep) continue;\n  const episode_id = 'eb' + Date.now().toString(36).slice(-6) + (counter++).toString(36);\n  browseCache[episode_id] = {title: ep.title, podcast: ep.podcast_name, url: ep.url, duration_min: null};\n  const d = new Date(ep.pub_date).toLocaleDateString('es-ES', {day:'numeric', month:'short'});\n  const header = counter === 1 ? `🎯 *${count} recomendaciones para ti*\\n\\n` : '';\n  const text = `${header}🎙 *${ep.podcast_name}*\\n_${ep.title}_ · ${d}\\n\\n💡 ${pick.reason}${ep.url ? '\\n🔗 '+ep.url : ''}`;\n  result.push({json: {reply_text: text, reply_markup: JSON.stringify({inline_keyboard: [[{text: '✅ Añadir', callback_data: `q_add:${episode_id}`},{text: '❌ Saltar', callback_data: `eb_skip:${episode_id}`}]]}), callback_query_id: null, answer_text: null}});\n}\nfs.writeFileSync(cachePath, JSON.stringify(browseCache, null, 2));\nreturn result;"
+      }
     }
   ],
   "connections": {
@@ -399,7 +650,7 @@
         ],
         [
           {
-            "node": "Read Context",
+            "node": "Is Queue?",
             "type": "main",
             "index": 0
           }
@@ -410,25 +661,7 @@
       "main": [
         [
           {
-            "node": "Switch Action",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Switch Action": {
-      "main": [
-        [
-          {
-            "node": "Handle Rate Request",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Handle Quick Rating",
+            "node": "Is Queue Callback?",
             "type": "main",
             "index": 0
           }
@@ -539,6 +772,213 @@
         [
           {
             "node": "Webhook Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Rate?": {
+      "main": [
+        [
+          {
+            "node": "Handle Rate Request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle Quick Rating",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Queue": {
+      "main": [
+        [
+          {
+            "node": "Queue Has Reply?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Queue Has Reply?": {
+      "main": [
+        [
+          {
+            "node": "Queue Send",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue Answer CB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Queue Send": {
+      "main": [
+        [
+          {
+            "node": "Webhook Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Queue Answer CB": {
+      "main": [
+        [
+          {
+            "node": "Webhook Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Queue Callback?": {
+      "main": [
+        [
+          {
+            "node": "Handle Queue",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Is Podcasts Callback?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Podcasts Callback?": {
+      "main": [
+        [
+          {
+            "node": "Handle Podcasts",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Is Rate?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Queue?": {
+      "main": [
+        [
+          {
+            "node": "Handle Queue",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Is Podcasts?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Podcasts?": {
+      "main": [
+        [
+          {
+            "node": "Handle Podcasts",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Is Episodes?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Episodes?": {
+      "main": [
+        [{"node": "Fetch & Handle Episodes", "type": "main", "index": 0}],
+        [{"node": "Is Recommend?", "type": "main", "index": 0}]
+      ]
+    },
+    "Is Recommend?": {
+      "main": [
+        [{"node": "Fetch & Recommend", "type": "main", "index": 0}],
+        [{"node": "Read Context", "type": "main", "index": 0}]
+      ]
+    },
+    "Fetch & Recommend": {
+      "main": [[{"node": "Queue Has Reply?", "type": "main", "index": 0}]]
+    },
+    "Fetch & Handle Episodes": {
+      "main": [
+        [
+          {
+            "node": "Queue Has Reply?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Podcasts": {
+      "main": [
+        [
+          {
+            "node": "Needs Search?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Needs Search?": {
+      "main": [
+        [
+          {
+            "node": "Search & Follow",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue Has Reply?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search & Follow": {
+      "main": [
+        [
+          {
+            "node": "Queue Has Reply?",
             "type": "main",
             "index": 0
           }

@@ -14,7 +14,7 @@ services:
       - GENERIC_TIMEZONE=Europe/Madrid
       - TZ=Europe/Madrid
       - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
-      - NODE_FUNCTION_ALLOW_BUILTIN=fs,path
+      - NODE_FUNCTION_ALLOW_BUILTIN=fs,path,crypto,https,http
       # n8n 1.x: owner account is created on first launch via UI
       # Generate an API key in Settings → API after first login, then set N8N_API_KEY in .env
     volumes:

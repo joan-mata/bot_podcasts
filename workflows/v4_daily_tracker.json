@@ -1,0 +1,140 @@
+{
+  "name": "V4 - Daily Episode Tracker",
+  "nodes": [
+    {
+      "id": "v4-0001",
+      "name": "Cron Daily 09:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [240, 400],
+      "parameters": {
+        "rule": {
+          "interval": [{"field": "cronExpression", "expression": "0 9 * * *"}]
+        }
+      }
+    },
+    {
+      "id": "v4-0002",
+      "name": "Read Profile",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [460, 400],
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst profile = JSON.parse(fs.readFileSync('/data/user_profile.json', 'utf8'));\nconst queue = (() => { try { return JSON.parse(fs.readFileSync('/data/podcast_queue.json','utf8')); } catch(e) { return {items:[]}; } })();\nconst podcasts = (profile.known_podcasts || []).filter(p => p.rss_url);\nreturn [{json: {podcasts, queue_items: queue.items}}];"
+      }
+    },
+    {
+      "id": "v4-0003",
+      "name": "Parse RSS Sources",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [680, 400],
+      "parameters": {
+        "jsCode": "const {podcasts} = $input.first().json;\nif (!podcasts.length) return [{json: {url: null, name: 'empty', skip: true}}];\nconst sources = [];\nfor (const p of podcasts) {\n  const url = p.rss_url || p.youtube_rss_url || null;\n  if (url) sources.push({json: {url, name: p.name, podcast_id: p.id || p.name, source: p.rss_url ? 'rss' : 'youtube'}});\n}\nif (!sources.length) return [{json: {url: null, name: 'empty', skip: true}}];\nreturn sources;"
+      }
+    },
+    {
+      "id": "v4-0004",
+      "name": "Fetch RSS Feeds",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1,
+      "position": [900, 400],
+      "parameters": {
+        "url": "={{$json.url}}",
+        "options": {"timeout": 10000}
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "v4-0005",
+      "name": "Filter Yesterday Episodes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [1120, 400],
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst items = $input.all().filter(i => !i.json.error);\nconst yesterday = new Date();\nyesterday.setDate(yesterday.getDate() - 1);\nyesterday.setHours(0, 0, 0, 0);\nconst dayBefore = new Date(yesterday);\ndayBefore.setDate(dayBefore.getDate() - 1);\n\n// Load skip_clips settings\nconst skipClipsMap = {};\ntry {\n  const profile = JSON.parse(fs.readFileSync('/data/user_profile.json', 'utf8'));\n  for (const p of (profile.known_podcasts || [])) { if (p.skip_clips) skipClipsMap[p.name.toLowerCase()] = true; }\n} catch(e) {}\nconst CLIP_RE = /\\b(short|shorts|clip|clips|recorte|recortes|highlight|highlights|teaser|trailer|avance|snippet)\\b|#shorts/i;\nfunction isClip(podcastName, title, duration) {\n  if (!skipClipsMap[podcastName.toLowerCase()]) return false;\n  if (duration) {\n    const parts = String(duration).split(':').map(Number);\n    const secs = parts.length === 3 ? parts[0]*3600+parts[1]*60+parts[2] : parts.length === 2 ? parts[0]*60+parts[1] : parseInt(duration,10);\n    if (secs > 0 && secs < 600) return true;\n  }\n  return CLIP_RE.test(title);\n}\n\nconst newEpisodes = [];\nfor (const item of items) {\n  const feed = item.json;\n  const episodes = Array.isArray(feed) ? feed : [feed];\n  for (const ep of episodes) {\n    const pubDate = ep.pubDate || ep.isoDate || ep.date;\n    if (!pubDate) continue;\n    const d = new Date(pubDate);\n    if (d >= dayBefore && d < new Date()) {\n      const podName = ep.meta?.title || ep.feed_title || 'Podcast';\n      const title = ep.title || 'Episodio sin título';\n      const dur = ep.itunes?.duration || ep.duration || null;\n      if (isClip(podName, title, dur)) continue;\n      newEpisodes.push({\n        podcast_name: podName,\n        title,\n        url: ep.link || ep.enclosure?.url || '',\n        spotify_url: null,\n        pub_date: pubDate,\n        duration: dur,\n        description: (ep.content || ep.summary || ep.contentSnippet || '').slice(0, 200)\n      });\n    }\n  }\n}\nif (!newEpisodes.length) return [{json: {skip: true, episodes: []}}];\nreturn [{json: {skip: false, episodes: newEpisodes}}];"
+      }
+    },
+    {
+      "id": "v4-0006",
+      "name": "Has New Episodes?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1340, 400],
+      "parameters": {
+        "conditions": {
+          "options": {"caseSensitive": true, "leftValue": "", "typeValidation": "loose"},
+          "conditions": [{"leftValue": "={{ $json.skip }}", "rightValue": true, "operator": {"type": "boolean", "operation": "false"}}],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "v4-0007",
+      "name": "Enrich with Spotify",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [1560, 300],
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst {episodes} = $input.first().json;\nlet spotifyToken = null;\ntry {\n  const tokenData = JSON.parse(fs.readFileSync('/data/spotify_token.json', 'utf8'));\n  spotifyToken = tokenData.access_token;\n} catch(e) {}\nreturn episodes.map(ep => ({json: {...ep, spotify_token: spotifyToken}}));"
+      }
+    },
+    {
+      "id": "v4-0008",
+      "name": "Format Episode Items",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [1780, 300],
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst items = $input.all();\nif (!items.length) return [];\n\nconst cachePath = '/data/v4_episodes_cache.json';\nlet cache = {};\ntry { cache = JSON.parse(fs.readFileSync(cachePath, 'utf8')); } catch(e) {}\n\nconst result = [];\nlet counter = 0;\nfor (const item of items) {\n  const ep = item.json;\n  const episode_id = 'v4' + Date.now().toString(36).slice(-6) + (counter++).toString(36);\n\n  // Save episode data to cache so queue handler (V2) can look it up\n  cache[episode_id] = {\n    title: ep.title || 'Episodio',\n    podcast: ep.podcast_name || 'Podcast',\n    url: ep.spotify_url || ep.url || '',\n    duration_min: null\n  };\n\n  const dur = ep.duration ? ` · ${ep.duration}` : '';\n  let text = `🎙️ *${ep.podcast_name || 'Podcast'}*\\n_${ep.title || 'Episodio'}${dur}_`;\n  if (ep.description) text += `\\n${ep.description.slice(0, 120)}`;\n  const link = ep.spotify_url || ep.url;\n  if (link) text += `\\n🔗 ${link}`;\n\n  const reply_markup = {\n    inline_keyboard: [[{text: '📋 Añadir a lista', callback_data: `q_add:${episode_id}`}]]\n  };\n\n  result.push({json: {text, episode_id, reply_markup}});\n}\n\nfs.writeFileSync(cachePath, JSON.stringify(cache, null, 2));\nreturn result;"
+      }
+    },
+    {
+      "id": "v4-0009",
+      "name": "Send Daily Update",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [2000, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ \"https://api.telegram.org/bot\" + $env.TELEGRAM_BOT_TOKEN + \"/sendMessage\" }}",
+        "sendHeaders": false,
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {chat_id: $env.TELEGRAM_CHAT_ID, text: $json.text, parse_mode: \"Markdown\", disable_web_page_preview: true, reply_markup: $json.reply_markup} }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "v4-0010",
+      "name": "No New Episodes",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1560, 500],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ \"https://api.telegram.org/bot\" + $env.TELEGRAM_BOT_TOKEN + \"/sendMessage\" }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {chat_id: $env.TELEGRAM_CHAT_ID, text: \"📭 Sin episodios nuevos ayer.\", parse_mode: \"Markdown\"} }}",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Cron Daily 09:00": {"main": [[{"node": "Read Profile", "type": "main", "index": 0}]]},
+    "Read Profile": {"main": [[{"node": "Parse RSS Sources", "type": "main", "index": 0}]]},
+    "Parse RSS Sources": {"main": [[{"node": "Fetch RSS Feeds", "type": "main", "index": 0}]]},
+    "Fetch RSS Feeds": {"main": [[{"node": "Filter Yesterday Episodes", "type": "main", "index": 0}]]},
+    "Filter Yesterday Episodes": {"main": [[{"node": "Has New Episodes?", "type": "main", "index": 0}]]},
+    "Has New Episodes?": {
+      "main": [
+        [{"node": "Enrich with Spotify", "type": "main", "index": 0}],
+        [{"node": "No New Episodes", "type": "main", "index": 0}]
+      ]
+    },
+    "Enrich with Spotify": {"main": [[{"node": "Format Episode Items", "type": "main", "index": 0}]]},
+    "Format Episode Items": {"main": [[{"node": "Send Daily Update", "type": "main", "index": 0}]]}
+  },
+  "settings": {"executionOrder": "v1"}
+}
