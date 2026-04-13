@@ -31,10 +31,11 @@ Clasifica el mensaje en uno de:
 - `host`: presentador/canal mencionado (puede ser null)
 
 **Preguntas de seguimiento (máx 2, solo si falta info clave):**
-- Si podcast no en perfil Y no preguntaste antes: "¿Quieres que lo añada a tu lista de seguidos?"
+- Si el nombre del podcast es ambiguo o no lo encuentras en `known_podcasts` Y no puedes identificarlo con certeza: "¿Cuál es la URL o el nombre exacto del podcast? Así puedo añadirlo correctamente a tu perfil."
+- Si podcast no en perfil Y nombre claro Y no preguntaste antes: "¿Quieres que lo añada a tu lista de seguidos?"
 - Si YouTube Y canal no en perfil: "¿Es de un canal que debería seguir para ti?"
 - Si sentiment=positive AND reason=null: "¿Qué es lo que más te ha gustado — el tema, el presentador, o cómo lo explicaron?"
-- NO preguntar si ya tienes sentiment + reason + si añadir o no
+- NO preguntar si ya tienes sentiment + reason + identificación del podcast
 
 **Actualizar perfil:**
 Devuelve bloque `profile_update` en tu respuesta para que n8n lo procese:
